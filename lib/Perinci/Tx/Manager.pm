@@ -84,7 +84,7 @@ sub _unlock_db {
 sub _init {
     my ($self) = @_;
     my $data_dir = $self->{data_dir};
-    $log->tracef("[txm] Initializing data dir %s ...", $data_dir);
+    $log->tracef("[tm] Initializing data dir %s ...", $data_dir);
 
     unless (-d "$self->{data_dir}/.trash") {
         mkdir "$self->{data_dir}/.trash"
@@ -123,9 +123,9 @@ _
     # last_call_id is for the recovery process to avoid repeating all the
     # function calls when rollback/undo/redo failed in the middle. for example,
     # tx1 (status=i) has 3 calls: c1, c2, c3. tx1 is being rollbacked
-    # (status=a). txm executes c3, then c2, then crashes before calling c1.
-    # since last_call_id is set to c2 at the end of calling c2, then during
-    # recovery, rollback continues at c1.
+    # (status=a). tm executes c3, then c2, then crashes before calling c1. since
+    # last_call_id is set to c2 at the end of calling c2, then during recovery,
+    # rollback continues at c1.
 
     $dbh->do(<<_) or return "$ep create call: ". $dbh->errstr;
 CREATE TABLE IF NOT EXISTS call (
@@ -251,7 +251,7 @@ _
     }
 
     $self->{_dbh} = $dbh;
-    $log->tracef("[txm] Data dir initialization finished");
+    $log->tracef("[tm] Data dir initialization finished");
     $self->_recover;
 }
 
@@ -349,7 +349,7 @@ sub _loop_calls {
     my ($self, $which, $calls) = @_;
 
     # log prefix
-    my $lp = "[txm] [$which]";
+    my $lp = "[tm] [$which]";
 
     return "BUG: 'which' must be rollback/undo/redo/call"
         unless $which =~ /\A(rollback|undo|redo|call)\z/;
@@ -547,7 +547,7 @@ sub _recover_or_cleanup {
 
     # TODO clean old tx's tmp_dir & trash_dir.
 
-    $log->tracef("[txm] Performing $which ...");
+    $log->tracef("[tm] Performing $which ...");
 
     # there should be only one process running
     my $res = $self->_lock_db(undef);
@@ -575,7 +575,7 @@ sub _recover_or_cleanup {
 
     # XXX when cleanup, discard all C, U, X Rtxs that have been around too long
 
-    $log->tracef("[txm] Finished $which");
+    $log->tracef("[tm] Finished $which");
     return;
 }
 
@@ -635,7 +635,7 @@ sub _wrap {
         or return [500, "BUG: args not passed to _wrap()"];
     my @caller = caller(1);
     $log->tracef(
-        "[txm] -> %s(%s) label=%s",
+        "[tm] -> %s(%s) label=%s",
         $caller[3],
         { map {$_=>$margs->{$_}} grep {!/^-/ && !/^args$/} keys %$margs },
         $wargs{label},
@@ -706,9 +706,9 @@ sub _wrap {
 
     if ($wargs{code}) {
         $res = $wargs{code}->(%$margs, _tx=>$cur_tx);
-        # on error, rollback sqlite tx and skip the rest
+        # on error, rollback and skip the rest
         if ($res->[0] >= 400) {
-            $self->_rollback;
+            $self->_rollback if $res->[3]{rollback} // 1;
             return $res;
         }
     }
@@ -738,7 +738,7 @@ sub _wrap2 {
     my $margs = $wargs{args}
         or return [500, "BUG: args not passed to _wrap()"];
     my @caller = caller(1);
-    $log->tracef("[txm] -> %s(%s)", $caller[3],
+    $log->tracef("[tm] -> %s(%s)", $caller[3],
                  { map {$_=>$margs->{$_}}
                        grep {!/^-/ && !/^args$/} keys %$margs });
 
@@ -767,7 +767,8 @@ sub begin {
             my $dbh = $self->{_dbh};
             my $r = $dbh->selectrow_hashref("SELECT * FROM tx WHERE str_id=?",
                                             {}, $args{tx_id});
-            return [409, "Another transaction with that ID exists"] if $r;
+            return [409, "Another transaction with that ID exists", undef,
+                    {rollback=>0}] if $r;
 
             # XXX check for limits
 
@@ -988,7 +989,7 @@ sub _discard {
                     "DELETE FROM undo_step WHERE call_id IN ".
                         "(SELECT id FROM call WHERE tx_ser_id IN ($txs))");
                 $dbh->do("DELETE FROM call WHERE tx_ser_id IN ($txs)");
-                $log->infof("[txm] discard tx: %s", \@txs);
+                $log->infof("[tm] discard tx: %s", \@txs);
             }
             [200, "OK"];
         },
