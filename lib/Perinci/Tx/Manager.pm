@@ -286,7 +286,8 @@ sub _check_calls {
 sub _loop_calls {
     # $calls is only for which='call', for rollback/undo/redo, the list of calls
     # is taken from the database table.
-    my ($self, $which, $calls) = @_;
+    my ($self, $which, $calls, $opts) = @_;
+    $opts //= {};
 
     # log prefix
     my $lp = "[tm] [$which]";
@@ -386,6 +387,7 @@ sub _loop_calls {
         return "invalid calls data: $res" if $res;
 
         my $i = 0;
+        my $sp_recorded;
         for my $c (@$calls) {
             my $lp = "$lp [call[$i] (function $c->[0])]";
             my $ep = "call[$i] (function $c->[0])";
@@ -416,11 +418,13 @@ sub _loop_calls {
                     # + identical time = out of order. quite slim though
                     eval { $uc->[1] = $json->encode($uc->[1]) };
                     return "$ep: can't serialize: $@" if $@;
+                    # insert savepoint name for the first undo_call only
+                    my $sp = $sp_recorded++ ? undef : $opts->{sp};
                     $dbh->do(
-                        "INSERT INTO $ut (tx_ser_id, ctime, f, args) VALUES (".
-                            "?,?,?,?)", {}, $tx->{ser_id}, $ctime, $uc->[0],
-                        $uc->[1]) or
-                            return "$ep: db: can't insert $ut: ".$dbh->errstr;
+                        "INSERT INTO $ut (tx_ser_id, sp, ctime, f, args) ".
+                            "VALUES (?,?,?,?,?)", {},
+                        $tx->{ser_id}, $sp, $ctime, $uc->[0], $uc->[1])
+                        or return "$ep: db: can't insert $ut: ".$dbh->errstr;
                     $j++;
                 }
             }
@@ -742,7 +746,9 @@ sub call {
         tx_status => ["i", "d", "u", "a", "v", "e"],
         code => sub {
             my $res = $self->_loop_calls(
-                'call', $args{calls} // [[$args{f}, $args{args}]]);
+                'call', $args{calls} // [[$args{f}, $args{args}]],
+                {sp=>$args{sp}},
+            );
             if ($res) {
                 return [532, $res];
             } else {
