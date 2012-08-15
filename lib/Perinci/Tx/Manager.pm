@@ -33,10 +33,6 @@ sub new {
     return "pa object must be an instance of Perinci::Access::InProcess"
         unless $opts{pa}->isa("Perinci::Access::InProcess");
 
-    # XXX ensure that pa is set to wrap/trap the functions and make functions
-    # accept hash arguments and return enveloped response. this is the default,
-    # though the default can be changed.
-
     my $obj = bless \%opts, $class;
     if ($opts{data_dir}) {
         unless (-d $opts{data_dir}) {
@@ -131,10 +127,11 @@ _
 CREATE TABLE IF NOT EXISTS call (
     tx_ser_id INTEGER NOT NULL, -- refers tx(ser_id)
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    sp TEXT NOT NULL, -- for named savepoint
     ctime REAL NOT NULL,
     f TEXT NOT NULL,
     args TEXT NOT NULL,
-    undo_data TEXT
+    UNIQUE(sp)
 )
 _
 
@@ -142,10 +139,11 @@ _
 CREATE TABLE IF NOT EXISTS undo_call (
     tx_ser_id INTEGER NOT NULL, -- refers tx(ser_id)
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    sp TEXT NOT NULL, -- for named savepoint
     ctime REAL NOT NULL,
     f TEXT NOT NULL,
     args TEXT NOT NULL,
-    undo_data TEXT
+    UNIQUE(sp)
 )
 _
 
@@ -165,73 +163,7 @@ _
     while (1) {
         my ($v) = $dbh->selectrow_array(
             "SELECT value FROM _meta WHERE name='v'");
-        if ($v eq '1') {
-            $dbh->begin_work;
-
-            # add 'nest_level' column
-            $dbh->do("ALTER TABLE call ADD COLUMN ".
-                         "nest_level INTEGER NOT NULL DEFAULT 1");
-            $dbh->do("UPDATE _meta SET value='2' WHERE name='v'")
-                or return "$ep update v 1->2: ".$dbh->errstr;
-
-            $dbh->commit;
-        } elsif ($v eq '2') {
-            $dbh->begin_work;
-
-            # replace last_call_id column with last_step_id
-            $dbh->do("CREATE TEMPORARY TABLE tx_backup (
-    ser_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-    str_id VARCHAR(200) NOT NULL,
-    owner_id VARCHAR(64) NOT NULL,
-    summary TEXT,
-    status CHAR(1) NOT NULL, -- i, a, C, U, R, u, d, X, (e) [uppercase=final]
-    ctime REAL NOT NULL,
-    commit_time REAL,
-    last_step_id INTEGER, -- last processed step when rollback
-    UNIQUE (str_id)
-)");
-            $dbh->do("INSERT INTO tx_backup
-    SELECT ser_id,str_id,owner_id,summary,status,ctime,commit_time,null FROM tx"
-                 );
-            $dbh->do("DROP TABLE tx");
-            $dbh->do("CREATE TABLE tx (
-    ser_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-    str_id VARCHAR(200) NOT NULL,
-    owner_id VARCHAR(64) NOT NULL,
-    summary TEXT,
-    status CHAR(1) NOT NULL, -- i, a, C, U, R, u, d, X, (e) [uppercase=final]
-    ctime REAL NOT NULL,
-    commit_time REAL,
-    last_step_id INTEGER, -- last processed step when rollback
-    UNIQUE (str_id)
-)");
-            $dbh->do("DROP TABLE tx_backup");
-
-            # drop 'nest_level' column, turns out we don't need it
-            $dbh->do("CREATE TEMPORARY TABLE call_backup(
-    tx_ser_id INTEGER NOT NULL, -- refers tx(ser_id)
-    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-    ctime REAL NOT NULL,
-    f TEXT NOT NULL,
-    args TEXT NOT NULL
-)");
-            $dbh->do("INSERT INTO call_backup
-    SELECT tx_ser_id,id,ctime,f,args FROM call");
-            $dbh->do("DROP TABLE call");
-            $dbh->do("CREATE TABLE call (
-    tx_ser_id INTEGER NOT NULL, -- refers tx(ser_id)
-    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-    ctime REAL NOT NULL,
-    f TEXT NOT NULL,
-    args TEXT NOT NULL
-)");
-            $dbh->do("INSERT INTO call SELECT * FROM call_backup");
-            $dbh->do("DROP TABLE call_backup");
-            $dbh->do("UPDATE _meta SET value='3' WHERE name='v'")
-                or return "$ep update v 2->3: ".$dbh->errstr;
-            $dbh->commit;
-
-        } elsif ($v eq '3') {
+        if ($v <= 3) {
 
             # changes incompatible (no longer undo_step and redo_step tables),
             # can lose data. we bail and let user decide for herself.
@@ -243,6 +175,14 @@ _
                 "Either delete the transaction database (and lose undo data) ",
                 "or use an older version of ".__PACKAGE__." (0.28 or older).\n",
             );
+
+        #} elsif ($v == x) {
+        #
+        #    $dbh->begin_work;
+        #
+        #    # ...
+        #
+        #    $dbh->commit;
 
         } else {
             # already the latest schema version
@@ -427,12 +367,12 @@ sub _loop_calls {
             $ut = undef;
         }
         if ($gt) {
-            # get the list of calls from database table: [[0]f, [1]args,
-            # [2]undo_data, [3]cid, [4]\&code]
+            # get the list of calls from database table: [[0]f, [1]args, [2]cid,
+            # [3]\&code]
             my $lci = $tx->{last_call_id};
             $calls = $dbh->selectall_arrayref(join(
                 "",
-                "SELECT f, args, undo_data, id FROM $gt WHERE tx_ser_id=? ",
+                "SELECT f, args, id FROM $gt WHERE tx_ser_id=? ",
                 ($lci ? "AND (id<>$lci AND ".
                      "ctime ".($reverse ? "<=" : ">=").
                          " (SELECT ctime FROM $gt WHERE id=$lci))":""),
@@ -448,22 +388,19 @@ sub _loop_calls {
         my $i = 0;
         for my $c (@$calls) {
             my $lp = "$lp [call[$i] (function $c->[0])]";
-            my $ep = "call[$i] (function $c->[0]):";
+            my $ep = "call[$i] (function $c->[0])";
             my %args = %{$c->[1] // {}};
-            $args{-tx_manager} = $self;
+            for (keys %args) { delete $args{$_} if /^-/ } # strip special args
+            $args{-tx_manager}  = $self;
             # the following special arg is just informative, so function knows
             # and can act more robust under rollback if it needs to
-            $args{-tx_action}  = 'rollback' if $rb;
-            if ($c->[2]) {
-                $args{-undo_action} = 'undo';
-                $args{-undo_data}   = $c->[2];
-            } else {
-                $args{-undo_action} = 'do';
-            }
+            $args{-tx_action}   = 'rollback' if $rb;
+            $args{-undo_action} = 'do';
             if ($ut) {
                 # call function with -dry_run=>1 first, to get undo data
                 $args{-dry_run} = 1;
-                $res = $c->[2]->(%args);
+                $args{-log_call} = 0;
+                $res = $c->[4]->(%args);
                 return "$ep: can't get undo data: $res->[0] - $res->[1]"
                     unless $res->[0] == 200 || $res->[0] == 304;
                 my $undo_data = $res->[3]{undo_data};
@@ -472,7 +409,6 @@ sub _loop_calls {
                 # record undo data (undo calls)
                 my $j = 0;
                 for my $uc (@$undo_data) {
-                    my $lp = "$lp undo_data[$j] ($uc->[0])";
                     my $ep = "$ep undo_data[$j] ($uc->[0])";
                     my $ctime = time();
                     # XXX make sure ctime is incremented for every item, because
@@ -496,6 +432,10 @@ sub _loop_calls {
             $log->tracef("$lp Call result: %s", $res);
             return "$ep: call failed: $res->[0] - $res->[1]"
                 unless $res->[0] == 200 || $res->[0] == 304;
+
+            # store temporarily to object, since we need to return undef on
+            # success.
+            $self->{_res} = $res;
 
             # update last_call_id so we don't have to repeat all steps after
             # recovery. error can be ignored here, i think.
@@ -706,6 +646,7 @@ sub _wrap {
 
     if ($wargs{code}) {
         $res = $wargs{code}->(%$margs, _tx=>$cur_tx);
+        $log->tracef("code res: %s", $res);
         # on error, rollback and skip the rest
         if ($res->[0] >= 400) {
             $self->_rollback if $res->[3]{rollback} // 1;
@@ -792,29 +733,21 @@ sub _call {
 sub call {
     my ($self, %args) = @_;
 
-    my ($f, $args);
+    my ($f, $args, $calls);
     $self->_wrap(
         args => \%args,
         # we allow calling call() during rollback, since a function can call
         # other function using call(), but we don't actually bother to save the
         # undo calls.
         tx_status => ["i", "d", "u", "a", "v", "e"],
-        hook_check_args => sub {
-            $f = $args{f} or return [400, "Please specify f"];
-            $args{args}   or return [400, "Please specify args"];
-
-            # strip special arguments
-            my %sargs;
-            for (keys %{$args{args}}) {
-                $sargs{$_} = $args{args}{$_} unless /^-/;
-            }
-            $args = \%sargs;
-            return [400, "args not serializable to JSON: $@"] if $@;
-
-            return;
-        },
         code => sub {
-            $self->_loop_calls('call', [[$f, $args]]);
+            my $res = $self->_loop_calls(
+                'call', $args{calls} // [[$args{f}, $args{args}]]);
+            if ($res) {
+                return [532, $res];
+            } else {
+                return $self->{_res}; # function res was cached here
+            }
         },
     );
 }
@@ -829,13 +762,11 @@ sub commit {
             my $tx  = $self->{_cur_tx};
             if ($tx->{status} eq 'a') {
                 my $res = $self->_rollback;
-                return $res if $res;
+                return [532, "Can't roll back: $res"] if $res;
                 return [200, "Rolled back"];
             }
-            $dbh->do("DELETE FROM redo_step WHERE call_id IN ".
-                         "(SELECT id FROM call WHERE tx_ser_id=?)",
-                     {}, $tx->{ser_id})
-                or return [532, "db: Can't empty redo_step: ".$dbh->errstr];
+            $dbh->do("DELETE FROM call WHERE tx_ser_id=?", {}, $tx->{ser_id})
+                or return [532, "db: Can't delete call: ".$dbh->errstr];
             $dbh->do("UPDATE tx SET status=?, commit_time=? WHERE ser_id=?",
                      {}, "C", $self->{_now}, $tx->{ser_id})
                 or return [532, "db: Can't update tx status to committed: ".
@@ -1115,24 +1046,29 @@ TM will create an entry for this transaction in its database.
 
 =head2 $tm->call(%args) => RESP
 
-Arguments: f (fully-qualified function name), args (arguments to function,
-hashref).
+Arguments: C<sp> (optional, savepoint name, must be unique for this transaction,
+not yet implemented), C<f> (fully-qualified function name), C<args> (arguments
+to function, hashref). Or, C<calls> (list of function calls, array, [[f1,
+args1], ...], alternative to specifying C<f> and C<args>).
 
-Call a function inside the scope of a transaction, i.e. recording it in journal
-to allow for rollback/undo/redo. TM will first check that function supports
-transaction, and return 412 if it does not.
+Call one or more functions inside the scope of a transaction, i.e. recording the
+undo call for each function call before actually calling it, to allow for
+rollback/undo/redo. TM will first check that each function supports transaction,
+and return 412 if it does not.
 
 (Note: if call is a dry-run call, or to a pure function [one that does not
 produce side effects], you can just perform the function directly without using
-the transaction manager.)
+TM.)
 
-After that, TM will call the function under C<< dry_run => 1 >> first, to
-collect the undo data. TM will save the undo data, then perform the call once
-again without dry_run.
+To call a single function, specify C<f> and C<args>. To call several functions,
+supply C<calls>.
+
+Note: special arguments (those started with dash, C<->) will be stripped from
+function arguments by TM.
 
 If response from function is not success, rollback() will be called.
 
-On success, will return the result from function.
+On success, will return the result from the last function.
 
 =head2 $tx->commit(%args) => RESP
 
