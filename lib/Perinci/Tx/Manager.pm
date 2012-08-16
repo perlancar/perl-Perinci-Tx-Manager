@@ -303,13 +303,17 @@ sub _loop_calls {
     # is taken from the database table.
     my ($self, $which, $calls, $opts) = @_;
     return if $calls && !@$calls;
-    $opts //= {};
+    $opts //= {}; # sp=>STR, dry_run=>BOOL
+    my $dry_run = $opts->{dry_run};
 
     # log prefix
     my $lp = "[tm] [$which]";
 
     return "BUG: 'which' must be rollback/undo/redo/call"
         unless $which =~ /\A(rollback|undo|redo|call)\z/;
+    return "BUG: dry_run can only be used with 'which'=call"
+        if $dry_run && $which ne 'call';
+
     my $rb = $which eq 'rollback';
 
     # this prevent endless loop in rollback, since we call functions when doing
@@ -373,7 +377,8 @@ sub _loop_calls {
     # are the rollback process itself, in which case we set tx status to X and
     # give up).
 
-    $log->tracef("$lp tx #%d (%s) ...", $tx->{ser_id}, $tx->{str_id});
+    $log->tracef("$lp tx #%d (%s) ...", $tx->{ser_id}, $tx->{str_id})
+        unless $dry_run;
 
     my $eval_err = eval {
         my $res;
@@ -440,31 +445,43 @@ sub _loop_calls {
                 my $undo_data = $res->[3]{undo_data} // [];
                 my $ures = $self->_check_calls($undo_data);
                 return "$ep: invalid undo data: $ures" if $ures;
-                # record undo data (undo calls)
-                my $j = 0;
-                for my $uc (@$undo_data) {
-                    my $ep = "$ep undo_data[$j] ($uc->[0])";
-                    my $ctime = time();
-                    # XXX make sure ctime is incremented for every item, because
-                    # otherwise there's a very slight chance that ID wraparound
-                    # + identical time = out of order. quite slim though
-                    eval { $uc->[1] = $json->encode($uc->[1]) };
-                    return "$ep: can't serialize: $@" if $@;
-                    # insert savepoint name for the first undo_call only
-                    my $sp = $sp_recorded++ ? undef : $opts->{sp};
-                    $dbh->do(
-                        "INSERT INTO $ut (tx_ser_id, sp, ctime, f, args) ".
-                            "VALUES (?,?,?,?,?)", {},
-                        $tx->{ser_id}, $sp, $ctime, $uc->[0], $uc->[1])
-                        or return "$ep: db: can't insert $ut: ".$dbh->errstr;
-                    $j++;
+
+                if ($dry_run) {
+                    my $status = @$undo_data ? 200 : 304;
+                    my $msg    = @$undo_data ? "OK" : "Nothing to do";
+                    return [$status, $msg, undef, {undo_data=>$undo_data}];
+                }
+
+                # record undo data (undo calls). rollback doesn't need to do
+                # this, failure in rollback will result in us giving up anyway.
+                unless ($rb) {
+                    my $j = 0;
+                    for my $uc (@$undo_data) {
+                        my $ep = "$ep undo_data[$j] ($uc->[0])";
+                        my $ctime = time();
+                        # XXX make sure ctime is incremented for every item,
+                        # because otherwise there's a very slight chance that ID
+                        # wraparound + identical time = out of order. quite slim
+                        # though
+                        eval { $uc->[1] = $json->encode($uc->[1]) };
+                        return "$ep: can't serialize: $@" if $@;
+                        # insert savepoint name for the first undo_call only
+                        my $sp = $sp_recorded++ ? undef : $opts->{sp};
+                        $dbh->do(
+                            "INSERT INTO $ut (tx_ser_id, sp, ctime, f, args) ".
+                                "VALUES (?,?,?,?,?)", {},
+                            $tx->{ser_id}, $sp, $ctime, $uc->[0], $uc->[1])
+                            or return "$ep: db: can't insert $ut: ".
+                                $dbh->errstr;
+                        $j++;
+                    }
                 }
             }
 
             # call function "for real" this time
             delete $args{-check_state};
             delete $args{-dry_run};
-            $log->tracef("$lp %d/%d Call (%s), undo_data: %s ...",
+            $log->tracef("$lp %d/%d Call (%s) ...",
                          $i, scalar(@$calls), $c->[1], $c->[2]);
             $res = $c->[4]->(%args); # we have previously save func to $c->[4]
             $log->tracef("$lp Call result: %s", $res);
@@ -774,7 +791,7 @@ sub call {
 
             my $res = $self->_loop_calls(
                 'call', $args{calls} // [[$args{f}, $args{args}]],
-                {sp=>$args{sp}},
+                {sp=>$args{sp}, dry_run=>$args{dry_run}},
             );
             if ($res) {
                 return [
@@ -1098,8 +1115,8 @@ TM will create an entry for this transaction in its database.
 
 Arguments: C<sp> (optional, savepoint name, must be unique for this transaction,
 not yet implemented), C<f> (fully-qualified function name), C<args> (arguments
-to function, hashref). Or, C<calls> (list of function calls, array, [[f1,
-args1], ...], alternative to specifying C<f> and C<args>).
+to function, hashref), C<dry_run> (bool). Or, C<calls> (list of function calls,
+array, [[f1, args1], ...], alternative to specifying C<f> and C<args>).
 
 Call one or more functions inside the scope of a transaction, i.e. recording the
 undo call for each function call before actually calling it, to allow for

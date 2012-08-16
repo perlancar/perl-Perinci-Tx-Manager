@@ -1,9 +1,19 @@
 Revision history for Perinci-Tx-Manager
 
-0.29     2012-08-16 (SHARYANTO) (not yet released)
+0.29     2012-08-16 (SHARYANTO)
 
-         First release, split to make Perinci dist empty (that dist was a
-         growing mixed bag and caused headache in dependencies).
+         [INCOMPATIBLE CHANGES]
+
+         - Now follow Rinci 1.1.23, no more steps, everything is function.
+
+         - Database format changed from v=3 to v=4, old format cannot be
+           converted to new.
+
+         [ETC]
+
+         - Tests have not been adjusted (taken from Perinci::Access::InProcess),
+           but so far Perinci::Sub::Gen::Undoable and File::Trash::Undoable
+           already work with this new version.
 
 
 0.28     2012-08-10 (SHARYANTO)
