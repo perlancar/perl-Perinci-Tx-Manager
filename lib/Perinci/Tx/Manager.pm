@@ -276,7 +276,8 @@ sub _check_calls {
     return "not an array" unless ref($calls) eq 'ARRAY';
     my $i = 0;
     for my $c (@$calls) {
-        my $ep = "call[$i] (function $c->[0])";
+        $i++;
+        my $ep = "call #$i (function $c->[0])";
         return "$ep: not an array" unless ref($c) eq 'ARRAY';
         eval {
             $c->[1] = $json->decode($c->[1]) if $c->[1] && $decode;
@@ -289,7 +290,6 @@ sub _check_calls {
         return "$ep: function does not support transaction"
             unless __test_tx_feature($meta);
         $c->[4] = $func;
-        $i++;
     }
     return;
 }
@@ -412,8 +412,9 @@ sub _loop_calls {
         my $i = 0;
         my $sp_recorded;
         for my $c (@$calls) {
-            my $lp = "$lp [call[$i] (function $c->[0])]";
-            my $ep = "call[$i] (function $c->[0])";
+            $i++;
+            my $lp = "$lp [call #$i (function $c->[0])]";
+            my $ep = "call #$i (function $c->[0])";
             my %args = %{$c->[1] // {}};
             for (keys %args) { delete $args{$_} if /^-/ } # strip special args
             $args{-tx_manager}  = $self;
