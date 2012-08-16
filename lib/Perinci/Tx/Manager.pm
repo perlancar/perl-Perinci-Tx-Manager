@@ -401,7 +401,7 @@ sub _loop_calls {
             if ($ut) {
                 # call function with -dry_run=>1 first, to get undo data
                 $args{-dry_run} = 1;
-                $args{-log_call} = 0;
+                $args{-check_state} = 1;
                 $res = $c->[4]->(%args);
                 return "$ep: can't get undo data: $res->[0] - $res->[1]"
                     unless $res->[0] == 200 || $res->[0] == 304;
@@ -430,6 +430,7 @@ sub _loop_calls {
             }
 
             # call function "for real" this time
+            delete $args{-check_state};
             $log->tracef("$lp %d/%d Call (%s), undo_data: %s ...",
                          $i, scalar(@$calls), $c->[1], $c->[2]);
             $res = $c->[4]->(%args); # we have previously save func to $c->[4]
@@ -578,12 +579,6 @@ sub _wrap {
     my $margs = $wargs{args}
         or return [500, "BUG: args not passed to _wrap()"];
     my @caller = caller(1);
-    $log->tracef(
-        "[tm] -> %s(%s) label=%s",
-        $caller[3],
-        { map {$_=>$margs->{$_}} grep {!/^-/ && !/^args$/} keys %$margs },
-        $wargs{label},
-    );
 
     my $res;
 
@@ -611,7 +606,11 @@ sub _wrap {
 
     # we need to begin sqltx here so that client's actions like rollback() and
     # commit() are indeed atomic and do not interfere with other clients'.
-    $dbh->begin_work or return [532, "db: Can't begin: ".$dbh->errstr];
+    my $begun;
+    unless ($self->{_in_sqltx}) {
+        $dbh->begin_work or return [532, "db: Can't begin: ".$dbh->errstr];
+        $begun++;
+    }
 
     # DBI/DBD::SQLite currently does not support checking whether we are in an
     # active sqltx, except $dbh->{BegunWork} which is undocumented. we use our
@@ -650,7 +649,6 @@ sub _wrap {
 
     if ($wargs{code}) {
         $res = $wargs{code}->(%$margs, _tx=>$cur_tx);
-        $log->tracef("code res: %s", $res);
         # on error, rollback and skip the rest
         if ($res->[0] >= 400) {
             $self->_rollback if $res->[3]{rollback} // 1;
@@ -658,7 +656,9 @@ sub _wrap {
         }
     }
 
-    $self->_commit_dbh or return [532, "db: Can't commit: ".$dbh->errstr];
+    unless ($begun) {
+        $self->_commit_dbh or return [532, "db: Can't commit: ".$dbh->errstr];
+    }
     $self->{_in_sqltx} = 0;
 
     if ($wargs{hook_after_commit}) {
@@ -683,9 +683,6 @@ sub _wrap2 {
     my $margs = $wargs{args}
         or return [500, "BUG: args not passed to _wrap()"];
     my @caller = caller(1);
-    $log->tracef("[tm] -> %s(%s)", $caller[3],
-                 { map {$_=>$margs->{$_}}
-                       grep {!/^-/ && !/^args$/} keys %$margs });
 
     my $res;
 
