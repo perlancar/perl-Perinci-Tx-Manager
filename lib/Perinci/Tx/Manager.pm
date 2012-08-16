@@ -127,7 +127,7 @@ _
 CREATE TABLE IF NOT EXISTS call (
     tx_ser_id INTEGER NOT NULL, -- refers tx(ser_id)
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-    sp TEXT NOT NULL, -- for named savepoint
+    sp TEXT, -- for named savepoint
     ctime REAL NOT NULL,
     f TEXT NOT NULL,
     args TEXT NOT NULL,
@@ -139,7 +139,7 @@ _
 CREATE TABLE IF NOT EXISTS undo_call (
     tx_ser_id INTEGER NOT NULL, -- refers tx(ser_id)
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-    sp TEXT NOT NULL, -- for named savepoint
+    sp TEXT, -- for named savepoint
     ctime REAL NOT NULL,
     f TEXT NOT NULL,
     args TEXT NOT NULL,
@@ -232,17 +232,32 @@ sub _get_func_and_meta {
     $res;
 }
 
+# about _in_sqltx: DBI/DBD::SQLite currently does not support checking whether
+# we are in an active sqltx, except $dbh->{BegunWork} which is undocumented. we
+# use our own flag here.
+
+# just a wrapper to avoid error when rollback with no active tx
 sub _rollback_dbh {
     my $self = shift;
     $self->{_dbh}->rollback if $self->{_in_sqltx};
     $self->{_in_sqltx} = 0;
 }
 
+# just a wrapper to avoid error when committing with no active tx
 sub _commit_dbh {
     my $self = shift;
     return 1 unless $self->{_in_sqltx};
     my $res = $self->{_dbh}->commit;
     $self->{_in_sqltx} = 0;
+    $res;
+}
+
+# just a wrapper to avoid error when beginning twice
+sub _begin_dbh {
+    my $self = shift;
+    return 1 if $self->{_in_sqltx};
+    my $res = $self->{_dbh}->begin_work;
+    $self->{_in_sqltx} = 1;
     $res;
 }
 
@@ -287,6 +302,7 @@ sub _loop_calls {
     # $calls is only for which='call', for rollback/undo/redo, the list of calls
     # is taken from the database table.
     my ($self, $which, $calls, $opts) = @_;
+    return if $calls && !@$calls;
     $opts //= {};
 
     # log prefix
@@ -303,8 +319,6 @@ sub _loop_calls {
 
     my $tx = $self->{_cur_tx};
     return "called w/o transaction, probably a bug" unless $tx;
-
-    $log->tracef("$lp tx #%d (%s) ...", $tx->{ser_id}, $tx->{str_id});
 
     my $dbh = $self->{_dbh};
     $self->_rollback_dbh;
@@ -335,6 +349,8 @@ sub _loop_calls {
             # to make sure, check once again if Rtx status is indeed updated
             my @r = $dbh->selectrow_array(
                 "SELECT status FROM tx WHERE ser_id=?", {}, $tx->{ser_id});
+            return "Can't update tx status #3 (tx doesn't exist in db)"
+                unless @r;
             return "Can't update tx status #2 (wants $ns, still $r[0])"
                 unless $r[0] eq $ns;
         }
@@ -344,6 +360,8 @@ sub _loop_calls {
     # processing, we return() from the eval and trigger a rollback (unless we
     # are the rollback process itself, in which case we set tx status to X and
     # give up).
+
+    $log->tracef("$lp tx #%d (%s) ...", $tx->{ser_id}, $tx->{str_id});
 
     my $eval_err = eval {
         my $res;
@@ -378,6 +396,7 @@ sub _loop_calls {
                      "ctime ".($reverse ? "<=" : ">=").
                          " (SELECT ctime FROM $gt WHERE id=$lci))":""),
                 "ORDER BY ctime, id"), {}, $tx->{ser_id});
+            return unless @$calls;
             $calls = [reverse @$calls] if $reverse;
             $log->tracef("$lp Calls to perform: %s", $calls);
         }
@@ -403,7 +422,7 @@ sub _loop_calls {
                 $args{-dry_run} = 1;
                 $args{-check_state} = 1;
                 $res = $c->[4]->(%args);
-                return "$ep: can't get undo data: $res->[0] - $res->[1]"
+                return "$ep: Check state failed: $res->[0] - $res->[1]"
                     unless $res->[0] == 200 || $res->[0] == 304;
                 my $undo_data = $res->[3]{undo_data};
                 my $ures = $self->_check_calls($undo_data);
@@ -477,9 +496,9 @@ sub _loop_calls {
             my $rbres = $self->_rollback;
             if ($rbres) {
                 return $eval_err.
-                    " (rollback failed: $rbres->[0] - $rbres->[1])";
+                    " (rollback failed: $rbres)";
             } else {
-                return $eval_err." (rolled back)";
+                return $eval_err." (rolled back)"; # txt1a SEE:txt1b
             }
         }
     }
@@ -606,16 +625,8 @@ sub _wrap {
 
     # we need to begin sqltx here so that client's actions like rollback() and
     # commit() are indeed atomic and do not interfere with other clients'.
-    my $begun;
-    unless ($self->{_in_sqltx}) {
-        $dbh->begin_work or return [532, "db: Can't begin: ".$dbh->errstr];
-        $begun++;
-    }
 
-    # DBI/DBD::SQLite currently does not support checking whether we are in an
-    # active sqltx, except $dbh->{BegunWork} which is undocumented. we use our
-    # own flag here.
-    local $self->{_in_sqltx} = 1;
+    $self->_begin_dbh or return [532, "db: Can't begin: ".$dbh->errstr];
 
     my $cur_tx = $dbh->selectrow_hashref(
         "SELECT * FROM tx WHERE str_id=?", {}, $tx_id);
@@ -656,10 +667,7 @@ sub _wrap {
         }
     }
 
-    unless ($begun) {
-        $self->_commit_dbh or return [532, "db: Can't commit: ".$dbh->errstr];
-    }
-    $self->{_in_sqltx} = 0;
+    $self->_commit_dbh or return [532, "db: Can't commit: ".$dbh->errstr];
 
     if ($wargs{hook_after_commit}) {
         my $res2 = $wargs{hook_after_tx}->(%$margs);
@@ -747,7 +755,10 @@ sub call {
                 {sp=>$args{sp}},
             );
             if ($res) {
-                return [532, $res];
+                return [
+                    532, $res, undef,
+                    # skip double rollback by _wrap() if we already roll back
+                    {rollback=>($res !~ /\(rolled back\)$/)}]; # txt1b SEE:txt1a
             } else {
                 return $self->{_res}; # function res was cached here
             }
