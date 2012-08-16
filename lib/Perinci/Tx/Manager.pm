@@ -454,6 +454,7 @@ sub _loop_calls {
 
             # call function "for real" this time
             delete $args{-check_state};
+            delete $args{-dry_run};
             $log->tracef("$lp %d/%d Call (%s), undo_data: %s ...",
                          $i, scalar(@$calls), $c->[1], $c->[2]);
             $res = $c->[4]->(%args); # we have previously save func to $c->[4]
