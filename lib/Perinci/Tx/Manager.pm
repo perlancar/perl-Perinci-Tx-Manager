@@ -449,7 +449,9 @@ sub _loop_calls {
                 if ($dry_run) {
                     my $status = @$undo_data ? 200 : 304;
                     my $msg    = @$undo_data ? "OK" : "Nothing to do";
-                    return [$status, $msg, undef, {undo_data=>$undo_data}];
+                    $self->{_res} = [
+                        $status, $msg, undef, {undo_data=>$undo_data}];
+                    return;
                 }
 
                 # record undo data (undo calls). rollback doesn't need to do
