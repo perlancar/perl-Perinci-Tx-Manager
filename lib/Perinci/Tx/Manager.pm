@@ -340,7 +340,11 @@ sub _loop_calls {
                     $os eq 'd' ? 'C' :
                         'U';
     if ($rb) {
-        $ns = $os eq 'i' ? 'a' : $os eq 'u' ? 'v' : $os eq 'd' ? 'e' : $os;
+        $ns =
+            $os eq 'i' ? 'a' :
+                $os eq 'a' ? 'R' :
+                    $os eq 'u' ? 'v' :
+                        $os eq 'd' ? 'e' : $os;
         if ($ns ne $os) {
             $dbh->do("UPDATE tx SET status='$ns', last_call_id=NULL ".
                          "WHERE ser_id=?", {}, $tx->{ser_id})
