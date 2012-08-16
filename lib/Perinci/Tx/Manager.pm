@@ -332,19 +332,27 @@ sub _loop_calls {
     # first we need to set the appropriate transaction status first, to prevent
     # other clients from interfering/racing.
     my $os = $tx->{status};
-    my $fs =
-        $os eq 'i' ? ($rb ? 'R' : $os) :
-            $os eq 'a' ? 'R' :
-                $os eq 'u' ? 'U' :
-                    $os eq 'v' ? 'C' :
-                        $os eq 'd' ? 'C' :
-                            'U';
-    if ($rb) {
-        my $ns =
-            $os eq 'i' ? 'a' :
-                $os eq 'u' ? 'v' :
-                    $os eq 'd' ? 'e' : $os;
+    my $ns; # temporary new status during processing
+    my $fs; # desired final status
+    if ($which eq 'call') {
+        # no change is expected
+        $ns = $os;
+        $fs = $os;
+    } elsif ($which eq 'rollback') {
+        $ns = $os eq 'i' ? 'a' : $os eq 'u' ? 'v' : $os eq 'd' ? 'e' : $os;
+        $fs = $os eq 'u' ? 'C' : $os eq 'd' ? 'U' : 'R';
+    } elsif ($which eq 'undo') {
+        $ns = 'u';
+        $fs = 'U';
+    } elsif ($which eq 'redo') {
+        $ns = 'd';
+        $fs = 'C';
+    }
+
+    unless ($which eq 'call') {
         if ($ns ne $os) {
+            $log->tracef("$lp Setting temporary transaction status ".
+                             "%s -> %s ...", $os, $ns);
             $dbh->do("UPDATE tx SET status='$ns', last_call_id=NULL ".
                          "WHERE ser_id=?", {}, $tx->{ser_id})
                 or return "db: Can't update tx status $os -> $ns: ".
@@ -382,11 +390,11 @@ sub _loop_calls {
             $ut = 'call';
         } elsif ($which eq 'redo') {
             $gt = 'call';
-            $reverse = 0;
+            $reverse = 1;
             $ut = 'undo_call';
         } elsif ($which eq 'rollback') {
             $gt = $os eq 'v' ? "call" : "undo_call";
-            $reverse = $os eq 'v' ? 0 : 1;
+            $reverse = 1; #$os eq 'v' ? 0 : 1;
             $ut = undef;
         }
         if ($gt) {
@@ -478,16 +486,14 @@ sub _loop_calls {
         # if we are have filled up undo_call, empty call, and vice versa.
         if ($ut) {
             my $t = $ut eq 'call' ? 'undo_call' : 'call';
-            $dbh->do("DELETE FROM $t WHERE id IN ".
-                         "(SELECT id FROM call WHERE tx_ser_id=?)",
-                     {}, $tx->{ser_id})
+            $dbh->do("DELETE FROM $t WHERE tx_ser_id=?", {}, $tx->{ser_id})
                 or return "db: Can't empty $t: ".$dbh->errstr;
         }
 
         # set transaction final status
         if ($os ne $fs) {
-            $log->tracef("$lp Setting transaction status from %s to %s ...",
-                         $os, $fs);
+            $log->tracef("$lp Setting final transaction status %s -> %s ...",
+                         $ns, $fs);
             $dbh->do("UPDATE tx SET status='$fs' WHERE ser_id=?",
                      {}, $tx->{ser_id})
                 or return "db: Can't set tx status to $fs: ".$dbh->errstr;
@@ -806,6 +812,23 @@ sub commit {
     );
 }
 
+# _ because it's dangerous, experimental
+sub _empty_undo_data {
+    my ($self, %args) = @_;
+    $self->_wrap(
+        args => \%args,
+        tx_status => ["i"],
+        code => sub {
+            my $dbh = $self->{_dbh};
+            my $tx  = $self->{_cur_tx};
+            $dbh->do("DELETE FROM undo_call WHERE tx_ser_id=?",
+                     {}, $tx->{ser_id})
+                or return [532, "db: Can't delete undo_call: ".$dbh->errstr];
+            [200, "OK"];
+        },
+    );
+}
+
 sub _rollback {
     my ($self) = @_;
     $self->_loop_calls('rollback');
@@ -946,9 +969,6 @@ sub _discard {
                 my $txs = join(",", @txs);
                 $dbh->do("DELETE FROM tx WHERE ser_id IN ($txs)")
                     or return [532, "db: Can't delete tx: ".$dbh->errstr];
-                $dbh->do(
-                    "DELETE FROM undo_step WHERE call_id IN ".
-                        "(SELECT id FROM call WHERE tx_ser_id IN ($txs))");
                 $dbh->do("DELETE FROM call WHERE tx_ser_id IN ($txs)");
                 $log->infof("[tm] discard tx: %s", \@txs);
             }
