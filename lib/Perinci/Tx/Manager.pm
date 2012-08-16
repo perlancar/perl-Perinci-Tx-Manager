@@ -437,7 +437,7 @@ sub _loop_calls {
                 $res = $c->[4]->(%args);
                 return "$ep: Check state failed: $res->[0] - $res->[1]"
                     unless $res->[0] == 200 || $res->[0] == 304;
-                my $undo_data = $res->[3]{undo_data};
+                my $undo_data = $res->[3]{undo_data} // [];
                 my $ures = $self->_check_calls($undo_data);
                 return "$ep: invalid undo data: $ures" if $ures;
                 # record undo data (undo calls)
