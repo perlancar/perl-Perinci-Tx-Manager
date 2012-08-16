@@ -332,19 +332,18 @@ sub _loop_calls {
     # first we need to set the appropriate transaction status first, to prevent
     # other clients from interfering/racing.
     my $os = $tx->{status};
-    my $ns = $os;
     my $fs =
-        ($os eq 'i' || $os eq 'a') ? 'R' :
-            $os eq 'u' ? 'U' :
-                $os eq 'v' ? 'C' :
-                    $os eq 'd' ? 'C' :
-                        'U';
+        $os eq 'i' ? ($rb ? 'R' : $os) :
+            $os eq 'a' ? 'R' :
+                $os eq 'u' ? 'U' :
+                    $os eq 'v' ? 'C' :
+                        $os eq 'd' ? 'C' :
+                            'U';
     if ($rb) {
-        $ns =
+        my $ns =
             $os eq 'i' ? 'a' :
-                $os eq 'a' ? 'R' :
-                    $os eq 'u' ? 'v' :
-                        $os eq 'd' ? 'e' : $os;
+                $os eq 'u' ? 'v' :
+                    $os eq 'd' ? 'e' : $os;
         if ($ns ne $os) {
             $dbh->do("UPDATE tx SET status='$ns', last_call_id=NULL ".
                          "WHERE ser_id=?", {}, $tx->{ser_id})
@@ -357,6 +356,7 @@ sub _loop_calls {
                 unless @r;
             return "Can't update tx status #2 (wants $ns, still $r[0])"
                 unless $r[0] eq $ns;
+            $os = $ns;
         }
     }
 
@@ -385,8 +385,8 @@ sub _loop_calls {
             $reverse = 0;
             $ut = 'undo_call';
         } elsif ($which eq 'rollback') {
-            $gt = $ns eq 'v' ? "call" : "undo_call";
-            $reverse = $ns eq 'v' ? 0 : 1;
+            $gt = $os eq 'v' ? "call" : "undo_call";
+            $reverse = $os eq 'v' ? 0 : 1;
             $ut = undef;
         }
         if ($gt) {
@@ -484,8 +484,13 @@ sub _loop_calls {
         }
 
         # set transaction final status
-        $dbh->do("UPDATE tx SET status='$fs' WHERE ser_id=?", {}, $tx->{ser_id})
-            or return "db: Can't set tx status to $fs: ".$dbh->errstr;
+        if ($os ne $fs) {
+            $log->tracef("$lp Setting transaction status from %s to %s ...",
+                         $os, $fs);
+            $dbh->do("UPDATE tx SET status='$fs' WHERE ser_id=?",
+                     {}, $tx->{ser_id})
+                or return "db: Can't set tx status to $fs: ".$dbh->errstr;
+        }
 
         return;
     }; # eval
