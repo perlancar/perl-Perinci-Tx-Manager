@@ -556,9 +556,9 @@ sub _cleanup {
 sub __resp_tx_status {
     state $statuses = {
         i => 'still in-progress',
-        a => 'aborted (further requests ignored until rolled back)',
-        v => 'aborted undo (further requests ignored until rolled back)',
-        e => 'aborted redo (further requests ignored until rolled back)',
+        a => 'aborted, further requests ignored until rolled back',
+        v => 'aborted undo, further requests ignored until rolled back',
+        e => 'aborted redo, further requests ignored until rolled back',
         C => 'already committed',
         R => 'already rolled back',
         U => 'already committed+undone',
@@ -569,7 +569,7 @@ sub __resp_tx_status {
     my ($r) = @_;
     my $s   = $r->{status};
     my $ss  = $statuses->{$s} // "unknown (bug)";
-    [480, "tx #$r->{ser_id}: Incorrect status, status is $s ($ss)"];
+    [480, "tx #$r->{ser_id}: Incorrect status, status is '$s' ($ss)"];
 }
 
 # all methods that work inside a transaction have some common code, e.g.
@@ -750,6 +750,11 @@ sub call {
         # undo calls.
         tx_status => ["i", "d", "u", "a", "v", "e"],
         code => sub {
+            my $cur_tx = $self->{_cur_tx};
+            if ($cur_tx->{status} ne 'i' && !$self->{_in_rollback}) {
+                return __resp_tx_status($cur_tx);
+            }
+
             my $res = $self->_loop_calls(
                 'call', $args{calls} // [[$args{f}, $args{args}]],
                 {sp=>$args{sp}},
