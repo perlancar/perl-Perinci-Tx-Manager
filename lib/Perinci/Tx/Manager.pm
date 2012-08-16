@@ -1010,7 +1010,7 @@ sub discard_all {
 }
 
 1;
-# ABSTRACT: Transaction manager
+# ABSTRACT: A Rinci transaction manager
 
 =head1 SYNOPSIS
 
