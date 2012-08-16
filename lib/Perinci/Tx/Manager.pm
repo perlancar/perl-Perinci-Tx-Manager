@@ -761,10 +761,13 @@ sub begin {
             $dbh->do("INSERT INTO tx (str_id, owner_id, summary, status, ".
                          "ctime) VALUES (?,?,?,?,?)", {},
                      $args{tx_id}, $args{client_token}//"", $args{summary}, "i",
-                     $self->{_now},
-                 ) or return [532, "db: Can't insert tx: ".$dbh->errstr];
+                     $self->{_now})
+                or return [532, "db: Can't insert tx: ".$dbh->errstr];
 
-            $self->{_tx_id} = $args{tx_id};
+            $self->{_tx_id} =  $args{tx_id};
+            $self->{_cur_tx} = $dbh->selectrow_hashref(
+                "SELECT * FROM tx WHERE str_id=?", {}, $args{tx_id})
+                or return [532, "db: Can't select tx: ".$dbh->errstr];
             [200, "OK"];
         },
     );
