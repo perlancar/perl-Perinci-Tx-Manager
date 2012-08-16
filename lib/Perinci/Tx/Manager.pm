@@ -413,7 +413,7 @@ sub _loop_calls {
         my $sp_recorded;
         for my $c (@$calls) {
             $i++;
-            my $lp = "$lp [call #$i (function $c->[0])]";
+            my $lp = "$lp [#$i (function $c->[0])]";
             my $ep = "call #$i (function $c->[0])";
             my %args = %{$c->[1] // {}};
             for (keys %args) { delete $args{$_} if /^-/ } # strip special args
