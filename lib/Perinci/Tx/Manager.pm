@@ -111,17 +111,19 @@ CREATE TABLE IF NOT EXISTS tx (
     status CHAR(1) NOT NULL, -- i, a, C, U, R, u, v, d, e, X [uppercase=final]
     ctime REAL NOT NULL,
     commit_time REAL,
-    last_call_id INTEGER, -- last processed call (or undo_call) when rollback
+    last_call_id INTEGER,
     UNIQUE (str_id)
 )
 _
 
-    # last_call_id is for the recovery process to avoid repeating all the
-    # function calls when rollback/undo/redo failed in the middle. for example,
-    # tx1 (status=i) has 3 calls: c1, c2, c3. tx1 is being rollbacked
-    # (status=a). tm executes c3, then c2, then crashes before calling c1. since
-    # last_call_id is set to c2 at the end of calling c2, then during recovery,
-    # rollback continues at c1.
+    # for tx with status=i, last_call_id is the in-progress call ID, set when in
+    # the middle of processing calls, then unset again after call has finished.
+    # during recovery, if tx with status=i still has this field set, it means it
+    # has crashed in the middle of call.
+    #
+    # for tx with other transient status (a, u/v, d/e) this field is used to
+    # mark which call has been processed. rollback/roll forward will start from
+    # this call instead of having to start from the first call of transaction.
 
     $dbh->do(<<_) or return "$ep create call: ". $dbh->errstr;
 CREATE TABLE IF NOT EXISTS call (
@@ -1118,19 +1120,12 @@ TM will create an entry for this transaction in its database.
 
 =head2 $tm->call(%args) => RESP
 
+Perform action for the transaction by calling one or more functions.
+
 Arguments: C<sp> (optional, savepoint name, must be unique for this transaction,
 not yet implemented), C<f> (fully-qualified function name), C<args> (arguments
 to function, hashref), C<dry_run> (bool). Or, C<calls> (list of function calls,
-array, [[f1, args1], ...], alternative to specifying C<f> and C<args>).
-
-Call one or more functions inside the scope of a transaction, i.e. recording the
-undo call for each function call before actually calling it, to allow for
-rollback/undo/redo. TM will first check that each function supports transaction,
-and return 412 if it does not.
-
-(Note: if call is a dry-run call, or to a pure function [one that does not
-produce side effects], you can just perform the function directly without using
-TM.)
+array, C<[[f1, args1], ...]>, alternative to specifying C<f> and C<args>).
 
 To call a single function, specify C<f> and C<args>. To call several functions,
 supply C<calls>.
@@ -1140,33 +1135,45 @@ function arguments by TM.
 
 If response from function is not success, rollback() will be called.
 
-On success, will return the result from the last function.
+Tip: To call in dry-run mode, or to call a pure function, you do not have to use
+TM's call() but rather call the function directly, since this will not have any
+side effects.
 
 =head2 $tx->commit(%args) => RESP
 
-Arguments: tx_id
+Commit a transaction.
+
+Arguments: C<tx_id>
 
 =head2 $tx->rollback(%args) => RESP
 
-Arguments: tx_id, sp (optional, savepoint name to rollback to a specific
+Rollback a transaction.
+
+Arguments: C<tx_id>, C<sp> (optional, savepoint name to rollback to a specific
 savepoint only).
 
 Currently rolling back to a savepoint is not implemented.
 
 =head2 $tx->prepare(%args) => RESP
 
-Currently will return 501 (not implemented). This TM does not support
-distributed transaction.
+Prepare a transaction.
 
-Arguments: tx_id
+Arguments: C<tx_id>
+
+Currently will return 501 (not implemented). Rinci::Transaction does not yet
+support distributed transaction.
 
 =head2 $tx->savepoint(%args) => RESP
 
-Arguments: tx_id, sp (savepoint name).
+Declare a savepoint.
+
+Arguments: C<tx_id>, C<sp> (savepoint name).
 
 Currently not implemented.
 
 =head2 $tx->release_savepoint(%args) => RESP
+
+Release (forget) a savepoint.
 
 Arguments: tx_id, sp (savepoint name).
 
@@ -1174,26 +1181,33 @@ Currently not implemented.
 
 =head2 $tx->undo(%args) => RESP
 
-Arguments: tx_id
+Undo a committed transaction.
+
+Arguments: C<tx_id>
 
 =head2 $tx->redo(%args) => RESP
 
-Arguments: tx_id
+Redo an undone committed transaction.
+
+Arguments: C<tx_id>
 
 =head2 $tx->list(%args) => RESP
 
-List transactions. Return an array of results sorted by creation date (in
-ascending order).
+List transactions.
 
 Arguments: B<detail> (bool, default 0, whether to return transaction records
 instead of just a list of transaction ID's).
 
+Return an array of results sorted by creation date (in ascending order).
+
 =head2 $tx->discard(%args) => RESP
 
-Discard (forget) a committed transaction. The transaction will no longer be
-undoable.
+Discard (forget) a client's committed transaction.
 
-Arguments: tx_id
+Arguments: C<tx_id>
+
+Transactions that can be discarded are committed, undone committed, or
+inconsistent ones (i.e., those with final statuses C<C>, C<U>, C<X>).
 
 =head2 $tm->discard_all(%args) => RESP
 
@@ -1202,12 +1216,8 @@ Discard (forget) all committed transactions.
 
 =head1 SEE ALSO
 
-L<Riap::Transaction>
+L<Rinci::Transaction>
 
 L<Perinci::Access::InProcess>
-
-L<Rinci::function::Undo>
-
-L<Rinci::function::Transaction>
 
 =cut
