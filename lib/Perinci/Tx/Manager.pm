@@ -308,11 +308,12 @@ sub __test_tx_support {
     return;
 }
 
-# check actions. actions should be [[f,args,JSON(args),cid?,\&code?], ...]. this
-# function will check whether function name is valid, whether arguments can be
-# deserialized, etc. modify actions in-place (e.g. qualify function names if
-# $opts->{qualify} is set, decode/encode JSON for arguments, cache function in
-# [3]). return undef on success, or error message on error.
+# check actions. actions should be [[f,args,JSON(args),cid?,\&code?,$meta?],
+# ...]. this function will check whether function name is valid, whether
+# arguments can be deserialized, etc. modify actions in-place (e.g. qualify
+# function names if $opts->{qualify} is set, decode/encode JSON for arguments,
+# cache function in [4], cache meta in [5]). return undef on success, or error
+# message on error.
 sub _check_actions {
     my ($self, $actions, $opts) = @_;
     $opts //= {};
@@ -340,6 +341,7 @@ sub _check_actions {
         $res = __test_tx_support($meta);
         return "$ep: $res" if $res;
         $a->[4] = $func;
+        $a->[5] = $meta;
     }
     return;
 }
@@ -460,6 +462,17 @@ sub _perform_action {
     my %args = %{$action->[1]};
     $args{-tx_v} = $proto_v;
     $args{-tx_is_rollback} = 1 if $which eq 'rollback';
+    my $dd = $action->[5]{deps} // {};
+    if ($dd->{tmp_dir}) { # XXX actually need to use dep_satisfy_rel
+        $res = $self->get_tmp_dir;
+        return $res->[1] unless $res->[0] == 200;
+        $args{-tmp_dir} = $res->[2];
+    }
+    if ($dd->{trash_dir}) { # XXX actually need to use dep_satisfy_rel
+        $res = $self->get_trash_dir;
+        return $res->[1] unless $res->[0] == 200;
+        $args{-trash_dir} = $res->[2];
+    }
     $args{-stash} = $self->{_stash};
 
     # call the first time, to get undo actions
