@@ -47,43 +47,104 @@ sub test_tx_action {
         "call $f => {".join(",", map{"$_=>$fargs->{$_}"} sort keys %$fargs)."}";
 
     subtest $tname => sub {
-        my ($res, $estatus);
-
-        # test normal action + commit
-
-        my $tx_id = UUID::Random::generate();
-        diag "tx_id = $tx_id";
-        $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
-        unless (is($res->[0], 200, "begin_tx succeeds")) {
-            diag "res = ", explain($res);
-            goto END_TESTS;
-        }
+        my $res;
+        my $estatus; # expected status
+        my $tx_id;
 
         my $uri = "/$f"; $uri =~ s!::!/!g;
-        $res = $pa->request(call => $uri, {args => $fargs, tx_id=>$tx_id});
-        $estatus = $targs{status} // 200;
-        unless(is($res->[0], $estatus, "status is $estatus")) {
-            diag "res = ", explain($res);
-            goto END_TESTS;
-        }
-        goto END_TESTS unless $estatus == 200;
 
-        $res = $pa->request(commit_tx => "/", {tx_id=>$tx_id});
-        unless(is($res->[0], $estatus, "commit_tx succeeds")) {
-            diag "res = ", explain($res);
-            goto END_TESTS;
-        }
+        subtest "crash during performing action = rollback" => sub {
+            my $num_actions;
+            no strict 'refs';
+            $res = *{$f}{CODE}->(%$fargs, -tx_action=>'check_state');
+            if ($res->[3]{do_actions}) {
+                $num_actions = @{ $res->[3]{do_actions} };
+            } else {
+                $num_actions = 1;
+            }
+            diag "number of actions: $num_actions";
 
-        # test repeat action = noop (idempotent)
-        $tx_id = UUID::Random::generate();
-        diag "tx_id = $tx_id";
+            $tx_id = UUID::Random::generate();
+            diag "tx_id = $tx_id";
 
-        # test normal action + crash after
-        $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
-        unless (is($res->[0], 200, "begin_tx succeeds")) {
-            diag "res = ", explain($res);
-            goto END_TESTS;
-        }
+            for my $i (1..$num_actions) {
+                $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
+                unless (is($res->[0], 200, "begin_tx succeeds")) {
+                    diag "res = ", explain($res);
+                    goto END_TESTS;
+                }
+
+                subtest "crash at action #$i" => sub {
+                    my $j = 0;
+                    local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
+                        my ($self, %args) = @_;
+                        die "CRASH" if ++$j == $i;
+                    };
+                    eval {
+                        $res = $pa->request(call=>$uri,
+                                            {args=>$fargs,tx_id=>$tx_id});
+                    };
+
+                    # doesn't die, trapped by eval{} in _action_loop. there's
+                    # also eval{} placed by periwrap
+                    #ok($@, "dies") or diag "res = ", explain($res);
+
+                    # reinit TM / recover
+                    $tm = Perinci::Tx::Manager->new(
+                        data_dir => "$tmpdir/.tx", pa => $pa);
+                    $res = $tm->list(tx_id=>$tx_id, detail=>1);
+                    is($res->[0], 200, "list() succeeds");
+                    is(scalar(@{$res->[2]}), 1, "transaction is found");
+                    is($res->[2][0]{tx_status}, 'R', "transaction status is R")
+                        or diag "res = ", explain($res);
+                };
+            }
+        };
+
+        subtest "normal action + commit" => sub {
+            $tx_id = UUID::Random::generate();
+            diag "tx_id = $tx_id";
+            $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
+            unless (is($res->[0], 200, "begin_tx succeeds")) {
+                diag "res = ", explain($res);
+                goto END_TESTS;
+            }
+
+            $res = $pa->request(call => $uri, {args => $fargs, tx_id=>$tx_id});
+            $estatus = $targs{status} // 200;
+            unless(is($res->[0], $estatus, "status is $estatus")) {
+                diag "res = ", explain($res);
+                goto END_TESTS;
+            }
+            goto END_TESTS unless $estatus == 200;
+
+            $res = $pa->request(commit_tx => "/", {tx_id=>$tx_id});
+            unless(is($res->[0], 200, "commit_tx succeeds")) {
+                diag "res = ", explain($res);
+                goto END_TESTS;
+            }
+        };
+
+        subtest "repeat action = noop (idempotent), rollback" => sub {
+            $tx_id = UUID::Random::generate();
+            diag "tx_id = $tx_id";
+            $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
+            unless (is($res->[0], 200, "begin_tx succeeds")) {
+                diag "res = ", explain($res);
+                goto END_TESTS;
+            }
+            $res = $pa->request(call => $uri, {args => $fargs, tx_id=>$tx_id});
+            unless(is($res->[0], 304, "status is 304")) {
+                diag "res = ", explain($res);
+                goto END_TESTS;
+            }
+
+            $res = $pa->request(rollback_tx => "/", {tx_id=>$tx_id});
+            unless(is($res->[0], 200, "rollback_tx succeeds")) {
+                diag "res = ", explain($res);
+                goto END_TESTS;
+            }
+        };
 
       END_TESTS:
         done_testing;

@@ -491,6 +491,7 @@ sub _perform_action {
     $self->_collect_stash($res);
 
     for ('after_check_state') {
+        $log->tracef("$lp hook: $_");
         $_hooks{$_}->($self, which=>$which, action=>$action, res=>$res)
             if $_hooks{$_};
     }
@@ -559,12 +560,11 @@ sub _perform_action {
         return "$ep: action failed: $res->[0] - $res->[1]"
             unless $res->[0] == 200 || $res->[0] == 304;
         $self->_collect_stash($res);
-
-        for ('after_fix_state') {
-            $_hooks{$_}->($self, which=>$which, action=>$action, res=>$res)
-                if $_hooks{$_};
-        }
-
+    }
+    for ('after_fix_state') {
+        $log->tracef("$lp hook: $_");
+        $_hooks{$_}->($self, which=>$which, action=>$action, res=>$res)
+            if $_hooks{$_};
     }
 
     # update last_action_id so we don't have to repeat all steps
@@ -621,7 +621,7 @@ sub _action_loop {
     # processing, we return() from the eval and trigger a rollback (unless we
     # are the rollback process itself, in which case we set tx status to X and
     # give up).
-    my $eval_err = eval {
+    my $eval_res = eval {
         $actions = $self->_get_actions_from_db($which) unless $actions;
 
         # check the actions
@@ -642,6 +642,8 @@ sub _action_loop {
 
         return;
     }; # eval
+    my $eval_err = $@ || $eval_res;
+    #$log->tracef("eval_err=%s", $eval_err);
 
     if ($eval_err) {
         if ($which eq 'rollback') {

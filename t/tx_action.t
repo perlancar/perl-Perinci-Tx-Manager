@@ -20,12 +20,6 @@ test_tx_action(
     f      => 'TestTx::setval',
     args   => {name=>'a', value=>1},
 );
-test_tx_action(
-    tmpdir => $tmpdir,
-    f      => 'TestTx::setval',
-    args   => {name=>'a', value=>1},
-    status => 304,
-);
 
 DONE_TESTING:
 done_testing();
