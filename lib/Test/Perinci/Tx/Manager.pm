@@ -151,6 +151,8 @@ sub test_tx_action {
     };
 }
 
+# TODO: test cleanup: .tmp/XXX and .trash/XXX are cleaned
+
 1;
 # ABSTRACT: Transaction tests
 
