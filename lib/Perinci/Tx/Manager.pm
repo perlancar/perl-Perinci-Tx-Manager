@@ -11,7 +11,7 @@ use Log::Any '$log';
 use Scalar::Util qw(blessed);
 use Time::HiRes qw(time);
 
-our $VERSION = 0.30; # VERSION
+# VERSION
 
 my $proto_v = 2;
 
