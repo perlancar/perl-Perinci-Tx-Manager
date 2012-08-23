@@ -49,6 +49,8 @@ sub test_tx_action {
     subtest $tname => sub {
         my ($res, $estatus);
 
+        # test normal action + commit
+
         my $tx_id = UUID::Random::generate();
         diag "tx_id = $tx_id";
         $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
@@ -68,6 +70,17 @@ sub test_tx_action {
 
         $res = $pa->request(commit_tx => "/", {tx_id=>$tx_id});
         unless(is($res->[0], $estatus, "commit_tx succeeds")) {
+            diag "res = ", explain($res);
+            goto END_TESTS;
+        }
+
+        # test repeat action = noop (idempotent)
+        $tx_id = UUID::Random::generate();
+        diag "tx_id = $tx_id";
+
+        # test normal action + crash after
+        $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
+        unless (is($res->[0], 200, "begin_tx succeeds")) {
             diag "res = ", explain($res);
             goto END_TESTS;
         }

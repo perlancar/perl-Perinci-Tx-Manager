@@ -20,6 +20,9 @@ our $lp = "[tm]"; # log prefix
 
 my $json = JSON->new->allow_nonref;
 
+# this is used for testing purposes only (e.g. to simulate crash)
+our %_hooks;
+
 # note: to avoid confusion, whenever we mention 'transaction' (or tx for short)
 # in the code, we must always specify whether it is a sqlite tx (sqltx) or a
 # Rinci tx (Rtx).
@@ -402,7 +405,8 @@ sub _set_tx_status_before_or_after_actions {
         if ($os ne $fs) {
             $log->tracef("$lp Setting final transaction status %s -> %s ...",
                          $ns, $fs);
-            $dbh->do("UPDATE tx SET status='$fs' WHERE ser_id=?",
+            $dbh->do("UPDATE tx SET status='$fs',last_action_id=NULL ".
+                         "WHERE ser_id=?",
                      {}, $tx->{ser_id})
                 or return "db: Can't set tx status to $fs: ".$dbh->errstr;
         }
@@ -486,6 +490,11 @@ sub _perform_action {
     my $do_actions   = $res->[3]{do_actions};
     $self->_collect_stash($res);
 
+    for ('after_check_state') {
+        $_hooks{$_}->($self, which=>$which, action=>$action, res=>$res)
+            if $_hooks{$_};
+    }
+
     my $pkg = $action->[0]; $pkg =~ s/::\w+\z//;
     $res = $self->_check_actions($undo_actions, {qualify=>$pkg});
     return $res if $res;
@@ -519,7 +528,7 @@ sub _perform_action {
         my $j = 0;
         for my $ua (@$undo_actions) {
             local $ep = "$ep undo_actions[$j] ($ua->[0])";
-            if ($which eq 'redo') {
+            if ($which eq 'undo') {
                 $dbh->do(
                     "INSERT INTO do_action (tx_ser_id,ctime,f,args) ".
                         "VALUES (?,?,?,?)", {},
@@ -550,6 +559,12 @@ sub _perform_action {
         return "$ep: action failed: $res->[0] - $res->[1]"
             unless $res->[0] == 200 || $res->[0] == 304;
         $self->_collect_stash($res);
+
+        for ('after_fix_state') {
+            $_hooks{$_}->($self, which=>$which, action=>$action, res=>$res)
+                if $_hooks{$_};
+        }
+
     }
 
     # update last_action_id so we don't have to repeat all steps
@@ -557,7 +572,7 @@ sub _perform_action {
 
     unless ($which eq 'action') {
         $dbh->do("UPDATE tx SET last_action_id=? WHERE ser_id=?", {},
-                 $action->[2]);
+                 $action->[3], $tx->{ser_id});
     }
 
     return;
@@ -574,7 +589,7 @@ sub _action_loop {
 
     my $res;
 
-    local $lp = "$lp [$which]";
+    local $lp = "[tm] [$which]";
 
     return "BUG: 'which' must be rollback/undo/redo/action"
         unless $which =~ /\A(rollback|undo|redo|action)\z/;
@@ -954,12 +969,21 @@ sub action {
                 return __resp_tx_status($cur_tx);
             }
 
+            delete $self->{_res};
             my $res = $self->_action($actions);
             if ($res) {
-                return [
-                    532, $res, undef,
-                    # skip double rollback by _wrap() if we already roll back
-                    {rollback=>($res !~ /\(rolled back\)$/)}]; # txt1b SEE:txt1a
+                if ($self->{_res} && $self->{_res}[0] !~ /200|304/) {
+                    return [$self->{_res}[0],
+                            $self->{_res}[1],
+                            undef,
+                            {tx_result=>$res}];
+                } else {
+                    return [
+                        532, $res, undef,
+                        # skip double rollback by _wrap() if we already roll
+                        # back. txt1b SEE:txt1a
+                        {rollback=>($res !~ /\(rolled back\)$/)}];
+                }
             } else {
                 return [$self->{_res}[0], $self->{_res}[1],
                         $self->{_stash}{result},
