@@ -11,7 +11,7 @@ use Log::Any '$log';
 use Scalar::Util qw(blessed);
 use Time::HiRes qw(time);
 
-# VERSION
+our $VERSION = 0.30; # VERSION
 
 my $proto_v = 2;
 
@@ -323,7 +323,7 @@ sub _check_actions {
         local $ep = "action #$i ($a->[0]): invalid action";
         return "$ep: not an array" unless ref($a) eq 'ARRAY';
         $a->[0] = "$opts->{qualify}::$a->[0]"
-            if $opts->{qualify} && $a->[0] =~ /::/;
+            if $opts->{qualify} && $a->[0] !~ /::/;
         return "$ep: invalid function name"
             unless $a->[0] =~ /\A\w+(::\w+)+\z/;
         eval {
@@ -485,8 +485,9 @@ sub _perform_action {
     # record action
 
     if ($which eq 'action') {
-        $dbh->do("INSERT INTO do_action (ctime,f,args) VALUES (?,?,?)", {},
-             time(), $action->[0], $action->[2])
+        $dbh->do("INSERT INTO do_action (tx_ser_id,ctime,f,args) ".
+                     "VALUES (?,?,?,?)", {},
+             $tx->{ser_id}, time(), $action->[0], $action->[2])
             or return "$ep: db: can't insert do_action: ".$dbh->errstr;
         my $action_id = $dbh->last_insert_id("","","","");
         $dbh->do("UPDATE tx SET last_action_id=? WHERE ser_id=?", {},
@@ -522,17 +523,21 @@ sub _perform_action {
             }
             $j++;
         }
-        $dbh->commit;
     }
 
     # call function "for real" this time
 
-    $args{-tx_action} = 'fix_state';
-    $self->{_res} = $res = $action->[4]->(%args);
-    $log->tracef("$lp fix_state result: %s", $res);
-    return "$ep: action failed: $res->[0] - $res->[1]"
-        unless $res->[0] == 200 || $res->[0] == 304;
-    $self->_collect_stash($res);
+    if ($do_actions && @$do_actions) {
+        $res = $self->_action($do_actions);
+        return "$ep: action failed: $res->[0] - $res->[1]" if $res;
+    } elsif ($self->{_res}[0] == 200) {
+        $args{-tx_action} = 'fix_state';
+        $self->{_res} = $res = $action->[4]->(%args);
+        $log->tracef("$lp fix_state result: %s", $res);
+        return "$ep: action failed: $res->[0] - $res->[1]"
+            unless $res->[0] == 200 || $res->[0] == 304;
+        $self->_collect_stash($res);
+    }
 
     # update last_action_id so we don't have to repeat all steps
     # after recovery. error can be ignored here, i think.
@@ -553,7 +558,6 @@ sub _action_loop {
     # $actions is only for which='action'. for rollback/undo/redo, $actions is
     # taken from the database table.
     my ($self, $which, $actions) = @_;
-    return if $actions && !@$actions;
 
     my $res;
 
@@ -601,23 +605,12 @@ sub _action_loop {
             $i++;
             local $lp = "$lp [action #$i/".scalar(@$actions)." ($action->[0])]";
             local $ep = "action #$i/".scalar(@$actions)." ($action->[0])";
-            $self->_perform_action($which, $action);
+            $res = $self->_perform_action($which, $action);
+            return $res if $res;
         }
 
-        $dbh->begin_work;
-        # if we are have filled up undo_call, empty call, and vice versa.
-        unless ($which eq 'rollback') {
-            my $t = $which eq 'redo' ? 'undo_action' : 'do_action';
-            $dbh->do("DELETE FROM $t WHERE tx_ser_id=?", {}, $tx->{ser_id})
-                or do {
-                    my $dbe = $dbh->errstr;
-                    $dbh->rollback;
-                    return "db: Can't empty $t: ".$dbe;
-                };
-        }
         $res = $self->_set_tx_status_after_actions($which);
-        do { $dbh->rollback; return $res } if $res;
-        $dbh->commit;
+        return $res if $res;
 
         return;
     }; # eval
@@ -933,6 +926,9 @@ sub action {
     my ($self, %args) = @_;
 
     my ($f, $args, $actions);
+    $actions = $args{actions} // [[$args{f}, $args{args}]];
+    return [304, "No actions to do"] unless @$actions;
+
     $self->_wrap(
         args => \%args,
         # we allow calling action() during rollback, since a function can call
@@ -945,17 +941,16 @@ sub action {
                 return __resp_tx_status($cur_tx);
             }
 
-            my $res = $self->_action_loop(
-                'action', $args{actions} // [[$args{f}, $args{args}]],
-                {sp=>$args{sp}, dry_run=>$args{dry_run}},
-            );
+            my $res = $self->_action($actions);
             if ($res) {
                 return [
                     532, $res, undef,
                     # skip double rollback by _wrap() if we already roll back
                     {rollback=>($res !~ /\(rolled back\)$/)}]; # txt1b SEE:txt1a
             } else {
-                return $self->{_res}; # function res was cached here
+                return [$self->{_res}[0], $self->{_res}[1],
+                        $self->{_stash}{result},
+                        $self->{_stash}{result_meta}];
             }
         },
     );
@@ -974,8 +969,8 @@ sub commit {
                 return [532, "Can't roll back: $res"] if $res;
                 return [200, "Rolled back"];
             }
-            $dbh->do("DELETE FROM do_action WHERE tx_ser_id=?",{},$tx->{ser_id})
-                or return [532, "db: Can't delete call: ".$dbh->errstr];
+            $dbh->do(
+                "DELETE FROM do_action WHERE tx_ser_id=?",{},$tx->{ser_id});
             $dbh->do("UPDATE tx SET status=?, commit_time=? WHERE ser_id=?",
                      {}, "C", $self->{_now}, $tx->{ser_id})
                 or return [532, "db: Can't update tx status to committed: ".
@@ -987,17 +982,36 @@ sub commit {
 
 sub _rollback {
     my ($self) = @_;
-    $self->_action_loop('rollback');
+    my $dbh = $self->{_dbh};
+    my $tx  = $self->{_cur_tx};
+
+    my $res = $self->_action_loop('rollback');
+    return $res if $res;
+    $dbh->do("DELETE FROM do_action   WHERE tx_ser_id=?", {}, $tx->{ser_id});
+    $dbh->do("DELETE FROM undo_action WHERE tx_ser_id=?", {}, $tx->{ser_id});
+    return;
 }
 
 sub _undo {
     my ($self) = @_;
-    $self->_action_loop('undo');
+    my $dbh = $self->{_dbh};
+    my $tx  = $self->{_cur_tx};
+
+    my $res = $self->_action_loop('undo');
+    return $res if $res;
+    $dbh->do("DELETE FROM undo_action WHERE tx_ser_id=?", {}, $tx->{ser_id});
+    return;
 }
 
 sub _redo {
     my ($self) = @_;
-    $self->_action_loop('redo');
+    my $dbh = $self->{_dbh};
+    my $tx  = $self->{_cur_tx};
+
+    my $res = $self->_action_loop('redo');
+    return $res if $res;
+    $dbh->do("DELETE FROM do_action WHERE tx_ser_id=?", {}, $tx->{ser_id});
+    return;
 }
 
 sub rollback {
