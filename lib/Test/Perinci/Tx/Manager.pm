@@ -180,7 +180,7 @@ sub test_tx_action {
                 $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
                 subtest "crash at rollback #$i" => sub {
                     my $ja = 0;
-                    my $jr = 0;
+                    my $jrb = 0;
                     local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
                         my ($self, %args) = @_;
                         my $nl = $self->{_action_nest_level} // 0;
@@ -191,8 +191,8 @@ sub test_tx_action {
                             return unless ++$ja == $num_actions;
                             for ("CRASH DURING ACTION") {$log->trace($_);die $_}
                         }
-                        $jr++ if $args{which} eq 'rollback';
-                        if ($jr == $i) {
+                        $jrb++ if $args{which} eq 'rollback';
+                        if ($jrb == $i) {
                             for("CRASH DURING ROLLBACK"){$log->trace($_);die $_}
                         }
                     };
@@ -291,11 +291,12 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing;
 
 
-        subtest "crash while rolling forward failed undo" => sub {
+        subtest "crash while roll forward failed undo -> tx status X" => sub {
             $tx_id = UUID::Random::generate();
             for my $i (1..$num_undo_actions) {
 
                 # first create a committed transaction
+                $reset_state->();
                 $pa->request(discard_tx=>"/", {tx_id=>$tx_id});
                 $pa->request(begin_tx  => "/", {tx_id=>$tx_id});
                 $pa->request(call => $uri, {args=>$fargs, tx_id=>$tx_id});
@@ -304,16 +305,22 @@ sub test_tx_action {
                 is($res->[2][0]{tx_status}, 'C', "transaction status is C")
                     or diag "res = ", explain($res);
 
-                subtest "crash at undo action #$i" => sub {
-                    my $ju = 0;
-                    local $Perinci::Tx::Manager::_settings{default_rollback_on_action_failure} = 0;
+                subtest "crash at rollback action #$i" => sub {
+                    my $ju = 0; my $jrb = 0;
                     local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
                         my ($self, %args) = @_;
-                        my $nl = $self->{_action_nest_level} // 0;
-                        return unless $args{which} eq 'undo';
-                        if (++$ju == $i) {
-                            for ("CRASH DURING UNDO ACTION") {
-                                $log->trace($_);die $_;
+                        if ($args{which} eq 'undo') {
+                            # first we trigger a rollback at the last step
+                            if (++$ju == $num_undo_actions) {
+                                for ("CRASH DURING UNDO ACTION") {
+                                    $log->trace($_);die $_;
+                                }
+                            }
+                        } elsif ($args{which} eq 'rollback') {
+                            if (++$jrb == $i) {
+                                for ("CRASH DURING ROLLBACK") {
+                                    $log->trace($_);die $_;
+                                }
                             }
                         }
                     };
@@ -329,7 +336,7 @@ sub test_tx_action {
                     $tm = Perinci::Tx::Manager->new(
                         data_dir => "$tmpdir/.tx", pa => $pa);
                     $res = $tm->list(tx_id=>$tx_id, detail=>1);
-                    is($res->[2][0]{tx_status}, 'U', "transaction status is U")
+                    is($res->[2][0]{tx_status}, 'X', "transaction status is X")
                         or diag "res = ", explain($res);
                 };
 
@@ -338,16 +345,107 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing;
 
 
-        # TODO
         subtest "crash while redo -> roll forward" => sub {
-            ok 1;
+            $tx_id = UUID::Random::generate();
+            for my $i (1..$num_actions) {
+
+                $reset_state->();
+                # first create an undone transaction
+                $pa->request(discard_tx=>"/", {tx_id=>$tx_id});
+                $pa->request(begin_tx  => "/", {tx_id=>$tx_id});
+                $pa->request(call => $uri, {args=>$fargs, tx_id=>$tx_id});
+                $pa->request(commit_tx => "/", {tx_id=>$tx_id});
+                $pa->request(undo => "/", {tx_id=>$tx_id});
+                $res = $tm->list(tx_id=>$tx_id, detail=>1);
+                is($res->[2][0]{tx_status}, 'U', "transaction status is U")
+                    or diag "res = ", explain($res);
+
+                subtest "crash at redo action #$i" => sub {
+                    my $jrd = 0;
+                    local $Perinci::Tx::Manager::_settings{default_rollback_on_action_failure} = 0;
+                    local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
+                        my ($self, %args) = @_;
+                        my $nl = $self->{_action_nest_level} // 0;
+                        return unless $args{which} eq 'redo';
+                        if (++$jrd == $i) {
+                            for ("CRASH DURING REDO ACTION") {
+                                $log->trace($_);die $_;
+                            }
+                        }
+                    };
+                    eval {
+                        $res = $pa->request(redo=>"/", {tx_id=>$tx_id});
+                    };
+
+                    # doesn't die, trapped by eval{} in _action_loop. there's
+                    # also eval{} placed by periwrap
+                    #ok($@, "dies") or diag "res = ", explain($res);
+
+                    # reinit TM / recover
+                    $tm = Perinci::Tx::Manager->new(
+                        data_dir => "$tmpdir/.tx", pa => $pa);
+                    $res = $tm->list(tx_id=>$tx_id, detail=>1);
+                    is($res->[2][0]{tx_status}, 'C', "transaction status is C")
+                        or diag "res = ", explain($res);
+                };
+
+            }
         };
+        goto DONE_TESTING;
         goto DONE_TESTING if $done_testing;
 
 
-        # TODO
-        subtest "crash while rolling forward failed redo" => sub {
-            ok 1;
+        subtest "crash while roll forward failed redo -> tx status X" => sub {
+            $tx_id = UUID::Random::generate();
+            for my $i (1..$num_actions) {
+
+                # first create an undone transaction
+                $reset_state->();
+                $pa->request(discard_tx=>"/", {tx_id=>$tx_id});
+                $pa->request(begin_tx  => "/", {tx_id=>$tx_id});
+                $pa->request(call => $uri, {args=>$fargs, tx_id=>$tx_id});
+                $pa->request(commit_tx => "/", {tx_id=>$tx_id});
+                $pa->request(undo => "/", {tx_id=>$tx_id});
+                $res = $tm->list(tx_id=>$tx_id, detail=>1);
+                is($res->[2][0]{tx_status}, 'U', "transaction status is U")
+                    or diag "res = ", explain($res);
+
+                subtest "crash at rollback action #$i" => sub {
+                    my $jrd = 0; my $jrb = 0;
+                    local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
+                        my ($self, %args) = @_;
+                        if ($args{which} eq 'redo') {
+                            # first we trigger a rollback at the last step
+                            if (++$jrd == $num_actions) {
+                                for ("CRASH DURING REDO ACTION") {
+                                    $log->trace($_);die $_;
+                                }
+                            }
+                        } elsif ($args{which} eq 'rollback') {
+                            if (++$jrb == $i) {
+                                for ("CRASH DURING ROLLBACK") {
+                                    $log->trace($_);die $_;
+                                }
+                            }
+                        }
+                    };
+                    eval {
+                        $res = $pa->request(redo=>"/", {tx_id=>$tx_id});
+                    };
+
+                    # doesn't die, trapped by eval{} in _action_loop. there's
+                    # also eval{} placed by periwrap
+                    #ok($@, "dies") or diag "res = ", explain($res);
+
+                    # reinit TM / recover
+                    $tm = Perinci::Tx::Manager->new(
+                        data_dir => "$tmpdir/.tx", pa => $pa);
+                    $res = $tm->list(tx_id=>$tx_id, detail=>1);
+                    is($res->[2][0]{tx_status}, 'X', "transaction status is X")
+                        or diag "res = ", explain($res);
+                };
+
+            }
         };
         goto DONE_TESTING if $done_testing;
 
