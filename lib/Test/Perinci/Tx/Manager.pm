@@ -80,7 +80,7 @@ sub test_tx_action {
                     my $j = 0;
                     local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
                         my ($self, %args) = @_;
-                        next if $args{which} eq 'rollback';
+                        return if $args{which} eq 'rollback';
                         $j++ if $args{which} eq 'action';
                         if ($j == $i) {
                             $log->tracef("Crashing deliberately ...");
