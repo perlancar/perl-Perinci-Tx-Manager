@@ -571,14 +571,13 @@ sub _perform_action {
         }
 
         $res = $self->_action($do_actions);
+        return $res if $res;
 
         for ('after_inner_action') {
             last unless $_hooks{$_};
             $log->tracef("$lp hook: $_");
             $_hooks{$_}->($self, which=>$which,actions=>$do_actions,res=>$res);
         }
-
-        return "$ep: action failed: $res->[0] - $res->[1]" if $res;
 
     } elsif ($self->{_res}[0] == 200) {
         $args{-tx_action} = 'fix_state';
