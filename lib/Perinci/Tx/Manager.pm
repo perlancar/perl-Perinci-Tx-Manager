@@ -432,6 +432,7 @@ sub _set_tx_status_after_actions {
     $self->_set_tx_status_before_or_after_actions('after', @_);
 }
 
+# return actions (arrayref)
 sub _get_actions_from_db {
     my ($self, $which) = @_;
 
