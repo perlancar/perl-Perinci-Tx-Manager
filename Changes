@@ -1,6 +1,6 @@
 Revision history for Perinci-Tx-Manager
 
-0.30     2012-08-23 (SHARYANTO) (not yet released)
+0.30     2012-08-24 (SHARYANTO)
 
          [INCOMPATIBLE CHANGES]
 
@@ -9,6 +9,8 @@ Revision history for Perinci-Tx-Manager
 
          - Database format changed from v=4 to v=5, due some tables being
            renamed.
+
+         - Various other small fixes.
 
 
 0.29     2012-08-16 (SHARYANTO)
