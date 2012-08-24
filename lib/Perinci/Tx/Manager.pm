@@ -22,6 +22,9 @@ my $json = JSON->new->allow_nonref;
 
 # this is used for testing purposes only (e.g. to simulate crash)
 our %_hooks;
+our %_settings = (
+    default_rollback_on_action_failure => 1,
+);
 
 # note: to avoid confusion, whenever we mention 'transaction' (or tx for short)
 # in the code, we must always specify whether it is a sqlite tx (sqltx) or a
@@ -112,7 +115,10 @@ sub _init {
     (-d $data_dir)
         or return "Transaction data dir ($data_dir) doesn't exist or not a dir";
     my $dbh = DBI->connect("dbi:SQLite:dbname=$self->{_db_file}", undef, undef,
-                           {RaiseError=>0});
+                           {
+                               RaiseError => 0,
+                               #sqlite_use_immediate_transaction => 1
+                           });
 
     # init database
 
@@ -372,7 +378,7 @@ sub _set_tx_status_before_or_after_actions {
         $fs = $os;
     } elsif ($whicha eq 'rollback') {
         $ns = $os eq 'i' ? 'a' : $os eq 'u' ? 'v' : $os eq 'd' ? 'e' : $os;
-        $fs = $os eq 'u' ? 'C' : $os eq 'd' ? 'U' : 'R';
+        $fs = $os eq 'u'||$ns eq 'v' ? 'C' : $os eq 'd'||$ns eq 'e' ? 'U' : 'R';
     } elsif ($whicha eq 'undo') {
         $ns = 'u';
         $fs = 'U';
@@ -612,7 +618,9 @@ sub _perform_action {
 sub _action_loop {
     # $actions is only for which='action'. for rollback/undo/redo, $actions is
     # taken from the database table.
-    my ($self, $which, $actions) = @_;
+    my ($self, $which, $actions, $opts) = @_;
+    $opts //= {};
+    $opts->{rollback} //= $_settings{default_rollback_on_action_failure};
 
     my $res;
 
@@ -685,7 +693,7 @@ sub _action_loop {
             $dbh->do("UPDATE tx SET status='X' WHERE ser_id=?",
                      {}, $tx->{ser_id});
             return $eval_err;
-        } elsif (($self->{_action_nest_level}//0) > 1) {
+        } elsif (!$opts->{rollback} || ($self->{_action_nest_level}//0) > 1) {
             # do not rollback nested action
             return $eval_err;
         } else {
