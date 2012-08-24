@@ -25,14 +25,15 @@ our @EXPORT_OK = qw(test_tx_action);
 sub test_tx_action {
     my %targs = @_;
 
-    my $tmpdir = $targs{tmpdir} or die "BUG: please supply tmpdir";
+    my $tmpdir     =$targs{tmpdir}      or die "BUG: please supply tmpdir";
+    my $reset_state=$targs{reset_state} or die "BUG: please supply reset_state";
 
     my $tm;
     if ($targs{reset_db_dir}) {
         remove "$tmpdir/.tx";
     }
 
-    $targs{reset_state}->();
+    $reset_state->();
 
     my $pa = Perinci::Access::InProcess->new(
         use_tx=>1,
@@ -129,7 +130,7 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing;
 
         # TMP
-        $targs{reset_state}->();
+        $reset_state->();
 
         subtest "crash during performing action -> rollback" => sub {
             $tx_id = UUID::Random::generate();
@@ -224,7 +225,7 @@ sub test_tx_action {
                         or diag "res = ", explain($res);
                 };
 
-                $targs{reset_state}->();
+                $reset_state->();
             }
         };
         goto DONE_TESTING if $done_testing;
