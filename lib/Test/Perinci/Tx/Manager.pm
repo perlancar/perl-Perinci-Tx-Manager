@@ -3,6 +3,7 @@ package Test::Perinci::Tx::Manager;
 use 5.010;
 use strict;
 use warnings;
+use Log::Any '$log';
 
 use File::Remove qw(remove);
 use Perinci::Access::InProcess 0.30;
@@ -79,7 +80,12 @@ sub test_tx_action {
                     my $j = 0;
                     local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
                         my ($self, %args) = @_;
-                        die "CRASH" if $args{which} ne 'rollback' && ++$j == $i;
+                        next if $args{which} eq 'rollback';
+                        $j++ if $args{which} eq 'action';
+                        if ($j == $i) {
+                            $log->tracef("Crashing deliberately ...");
+                            die "CRASH";
+                        }
                     };
                     eval {
                         $res = $pa->request(call=>$uri,
