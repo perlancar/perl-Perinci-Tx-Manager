@@ -36,7 +36,12 @@ our %_hooks;
 # note: we have not dealt with sqlite's rowid wraparound. since it's a 64-bit
 # integer, we're pretty safe. we also usually rely on ctime first for sorting.
 
-# new() should return an error string if failed
+# note: in general, methods prefixed with _ either return nothing, or return
+# undef on success and error message string on error (except
+# _get_func_and_meta(), _resp_tx_status(), _wrap(), _wrap2(), and a few others).
+# public methods return enveloped result (except new()).
+
+# new() should return object on success, or an error string if failed
 sub new {
     my ($class, %opts) = @_;
     return "Please supply pa object" unless blessed $opts{pa};
@@ -61,6 +66,7 @@ sub new {
     $obj;
 }
 
+# return undef on success, or an error string on failure
 sub _lock_db {
     my ($self, $shared) = @_;
 
@@ -300,8 +306,9 @@ sub _begin_dbh {
     $res;
 }
 
-sub __test_tx_support {
-    my $meta = shift;
+# return undef on success, or an error string on failure
+sub _test_tx_support {
+    my ($self, $meta) = @_;
     my $ff = $meta->{features} // {};
     $ff->{tx} or return "function does not support transaction";
     ($ff->{tx}{v} // 1) == $proto_v
@@ -341,7 +348,7 @@ sub _check_actions {
         my $res = $self->_get_func_and_meta($a->[0]);
         return "$ep: can't get metadata" unless $res->[0] == 200;
         my ($func, $meta) = @{$res->[2]};
-        $res = __test_tx_support($meta);
+        $res = $self->_test_tx_support($meta);
         return "$ep: $res" if $res;
         $a->[4] = $func;
         $a->[5] = $meta;
@@ -759,7 +766,10 @@ sub _recover {
     return;
 }
 
-sub __resp_tx_status {
+# return enveloped result
+sub _resp_tx_status {
+    my ($self, $r) = @_;
+
     state $statuses = {
         i => 'still in-progress',
         a => 'aborted, further requests ignored until rolled back',
@@ -772,7 +782,7 @@ sub __resp_tx_status {
         d => 'redoing',
         X => 'inconsistent',
     };
-    my ($r) = @_;
+
     my $s   = $r->{status};
     my $ss  = $statuses->{$s} // "unknown (bug)";
     [480, "tx #$r->{ser_id}: Incorrect status, status is '$s' ($ss)"];
@@ -799,6 +809,8 @@ sub __resp_tx_status {
 # - hook_after_commit (coderef, will be passed args as hash).
 #
 # wrap() will also put current Rtx record to $self->{_cur_tx}
+#
+# return enveloped result
 sub _wrap {
     my ($self, %wargs) = @_;
     my $margs = $wargs{args}
@@ -860,7 +872,7 @@ sub _wrap {
         }
         unless ($ok) {
             $self->_rollback_dbh;
-            return __resp_tx_status($cur_tx);
+            return $self->_resp_tx_status($cur_tx);
         }
     }
 
@@ -892,6 +904,7 @@ sub _wrap {
 #
 # - code* (coderef, main method code, will be passed args as hash)
 #
+# return enveloped result
 sub _wrap2 {
     my ($self, %wargs) = @_;
     my $margs = $wargs{args}
@@ -943,6 +956,7 @@ sub begin {
     );
 }
 
+# return undef on success, or error message string
 sub _action {
     my ($self, $actions) = @_;
     $self->_action_loop('action', $actions);
@@ -968,7 +982,7 @@ sub action {
         code => sub {
             my $cur_tx = $self->{_cur_tx};
             if ($cur_tx->{status} ne 'i' && !$self->{_in_rollback}) {
-                return __resp_tx_status($cur_tx);
+                return $self->_resp_tx_status($cur_tx);
             }
 
             delete $self->{_res};
@@ -1019,6 +1033,7 @@ sub commit {
     );
 }
 
+# return undef on success, or error message string
 sub _rollback {
     my ($self) = @_;
     my $dbh = $self->{_dbh};
@@ -1031,6 +1046,7 @@ sub _rollback {
     return;
 }
 
+# return undef on success, or error message string
 sub _undo {
     my ($self) = @_;
     my $dbh = $self->{_dbh};
@@ -1042,6 +1058,7 @@ sub _undo {
     return;
 }
 
+# return undef on success, or error message string
 sub _redo {
     my ($self) = @_;
     my $dbh = $self->{_dbh};
@@ -1162,6 +1179,7 @@ sub redo {
     );
 }
 
+# return enveloped result
 sub _discard {
     my ($self, $which, %args) = @_;
     my $wmeth = $which eq 'one' ? '_wrap' : '_wrap2';
