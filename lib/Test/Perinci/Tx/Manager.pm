@@ -79,7 +79,7 @@ sub test_tx_action {
                     my $j = 0;
                     local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
                         my ($self, %args) = @_;
-                        die "CRASH" if ++$j == $i;
+                        die "CRASH" if $args{which} ne 'rollback' && ++$j == $i;
                     };
                     eval {
                         $res = $pa->request(call=>$uri,
