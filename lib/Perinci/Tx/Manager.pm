@@ -396,6 +396,8 @@ sub _set_tx_status_before_or_after_actions {
                 unless @r;
             return "Can't update tx status #2 (wants $ns, still $r[0])"
                 unless $r[0] eq $ns;
+            # update row cache
+            $tx->{status} = $ns; $tx->{last_action_id} = undef;
         }
     }
     $os = $ns;
@@ -416,6 +418,8 @@ sub _set_tx_status_before_or_after_actions {
                          "WHERE ser_id=?",
                      {}, $tx->{ser_id})
                 or return "db: Can't set tx status to $fs: ".$dbh->errstr;
+            # update row cache
+            $tx->{status} = $fs; $tx->{last_action_id} = undef;
         }
     }
 
@@ -499,9 +503,9 @@ sub _perform_action {
     $self->_collect_stash($res);
 
     for ('after_check_state') {
+        last unless $_hooks{$_};
         $log->tracef("$lp hook: $_");
-        $_hooks{$_}->($self, which=>$which, action=>$action, res=>$res)
-            if $_hooks{$_};
+        $_hooks{$_}->($self, which=>$which, action=>$action, res=>$res);
     }
 
     my $pkg = $action->[0]; $pkg =~ s/::\w+\z//;
@@ -559,8 +563,23 @@ sub _perform_action {
     # call function "for real" this time
 
     if ($do_actions && @$do_actions) {
+
+        for ('before_inner_action') {
+            last unless $_hooks{$_};
+            $log->tracef("$lp hook: $_");
+            $_hooks{$_}->($self, which=>$which, actions=>$do_actions);
+        }
+
         $res = $self->_action($do_actions);
+
+        for ('after_inner_action') {
+            last unless $_hooks{$_};
+            $log->tracef("$lp hook: $_");
+            $_hooks{$_}->($self, which=>$which,actions=>$do_actions,res=>$res);
+        }
+
         return "$ep: action failed: $res->[0] - $res->[1]" if $res;
+
     } elsif ($self->{_res}[0] == 200) {
         $args{-tx_action} = 'fix_state';
         $self->{_res} = $res = $action->[4]->(%args);
@@ -569,10 +588,11 @@ sub _perform_action {
             unless $res->[0] == 200 || $res->[0] == 304;
         $self->_collect_stash($res);
     }
+
     for ('after_fix_state') {
+        last unless $_hooks{$_};
         $log->tracef("$lp hook: $_");
-        $_hooks{$_}->($self, which=>$which, action=>$action, res=>$res)
-            if $_hooks{$_};
+        $_hooks{$_}->($self, which=>$which, action=>$action, res=>$res);
     }
 
     # update last_action_id so we don't have to repeat all steps
@@ -597,7 +617,13 @@ sub _action_loop {
 
     my $res;
 
-    local $lp = "[tm] [$which]";
+    local $self->{_action_nest_level} = ($self->{_action_nest_level}//0) + 1
+        if $which eq 'action';
+
+    local $lp = "[tm] [".
+        "$which".
+            ($self->{_action_nest_level} ? "($self->{_action_nest_level})":"").
+                "]";
 
     return "BUG: 'which' must be rollback/undo/redo/action"
         unless $which =~ /\A(rollback|undo|redo|action)\z/;
@@ -651,7 +677,7 @@ sub _action_loop {
         return;
     }; # eval
     my $eval_err = $@ || $eval_res;
-    #$log->tracef("eval_err=%s", $eval_err);
+    #$log->tracef("eval_err=%s", $eval_err); #COMMENT
 
     if ($eval_err) {
         if ($which eq 'rollback') {
@@ -659,6 +685,9 @@ sub _action_loop {
             # set Rtx status to X (inconsistent) and ignore it.
             $dbh->do("UPDATE tx SET status='X' WHERE ser_id=?",
                      {}, $tx->{ser_id});
+            return $eval_err;
+        } elsif (($self->{_action_nest_level}//0) > 1) {
+            # do not rollback nested action
             return $eval_err;
         } else {
             my $rbres = $self->_rollback;
@@ -805,6 +834,9 @@ sub _resp_tx_status {
 #
 # - code (coderef, main method code, will be passed args as hash)
 #
+# - rollback (bool, whether we should do rollback if code does not return
+#   success
+#
 # - hook_check_args (coderef, will be passed args as hash)
 #
 # - hook_after_commit (coderef, will be passed args as hash).
@@ -881,7 +913,7 @@ sub _wrap {
         $res = $wargs{code}->(%$margs, _tx=>$cur_tx);
         # on error, rollback and skip the rest
         if ($res->[0] >= 400) {
-            $self->_rollback if $res->[3]{rollback} // 1;
+            $self->_rollback if $wargs{rollback} // 1;
             return $res;
         }
     }
@@ -980,6 +1012,7 @@ sub action {
         # other function using action(), but we don't actually bother to save
         # the undo actions.
         tx_status => ["i", "d", "u", "a", "v", "e"],
+        rollback => 0, # _action_loop already does rollback
         code => sub {
             my $cur_tx = $self->{_cur_tx};
             if ($cur_tx->{status} ne 'i' && !$self->{_in_rollback}) {
@@ -995,11 +1028,7 @@ sub action {
                             undef,
                             {tx_result=>$res}];
                 } else {
-                    return [
-                        532, $res, undef,
-                        # skip double rollback by _wrap() if we already roll
-                        # back. txt1b SEE:txt1a
-                        {rollback=>($res !~ /\(rolled back\)$/)}];
+                    return $res;
                 }
             } else {
                 return [$self->{_res}[0], $self->{_res}[1],
@@ -1076,6 +1105,7 @@ sub rollback {
     $self->_wrap(
         args => \%args,
         tx_status => ["i", "a"],
+        rollback => 0, # _action_loop already does rollback
         code => sub {
             my $res = $self->_rollback;
             $res ? [532, $res] : [200, "OK"];
@@ -1150,6 +1180,7 @@ sub undo {
     $self->_wrap(
         args => \%args,
         tx_status => ["C"],
+        rollback => 0, # _action_loop already does rollback
         code => sub {
             my $res = $self->_undo;
             $res ? [532, $res] : [200, "OK"];
@@ -1173,6 +1204,7 @@ sub redo {
     $self->_wrap(
         args => \%args,
         tx_status => ["U"],
+        rollback => 0, # _action_loop already does rollback
         code => sub {
             my $res = $self->_redo;
             $res ? [532, $res] : [200, "OK"];

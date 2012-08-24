@@ -32,6 +32,8 @@ sub test_tx_action {
         remove "$tmpdir/.tx";
     }
 
+    $targs{reset_state}->();
+
     my $pa = Perinci::Access::InProcess->new(
         use_tx=>1,
         custom_tx_manager => sub {
@@ -55,17 +57,19 @@ sub test_tx_action {
 
         my $uri = "/$f"; $uri =~ s!::!/!g;
 
-        subtest "crash during performing action = rollback" => sub {
-            my $num_actions;
-            no strict 'refs';
-            $res = *{$f}{CODE}->(%$fargs, -tx_action=>'check_state');
-            if ($res->[3]{do_actions}) {
-                $num_actions = @{ $res->[3]{do_actions} };
-            } else {
-                $num_actions = 1;
-            }
-            diag "number of actions: $num_actions";
+        my $num_actions;
+        no strict 'refs';
+        $res = *{$f}{CODE}->(%$fargs, -tx_action=>'check_state');
+        my $has_do_actions;
+        if ($res->[3]{do_actions}) {
+            $num_actions = @{ $res->[3]{do_actions} };
+            $has_do_actions++;
+        } else {
+            $num_actions = 1;
+        }
+        diag "number of actions: $num_actions";
 
+        subtest "crash during performing action -> rollback" => sub {
             $tx_id = UUID::Random::generate();
             diag "tx_id = $tx_id";
 
@@ -77,14 +81,15 @@ sub test_tx_action {
                 }
 
                 subtest "crash at action #$i" => sub {
-                    my $j = 0;
+                    my $ja = 0;
                     local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
                         my ($self, %args) = @_;
+                        my $nl = $self->{_action_nest_level}//0;
+                        return unless $nl <= ($has_do_actions ? 2:1);
                         return if $args{which} eq 'rollback';
-                        $j++ if $args{which} eq 'action';
-                        if ($j == $i) {
-                            $log->tracef("Crashing deliberately ...");
-                            die "CRASH";
+                        $ja++ if $args{which} eq 'action';
+                        if ($ja == $i && $nl == ($has_do_actions ? 2:1)) {
+                            for ("CRASH DURING ACTION") {$log->trace($_);die $_}
                         }
                     };
                     eval {
@@ -105,6 +110,59 @@ sub test_tx_action {
                     is($res->[2][0]{tx_status}, 'R', "transaction status is R")
                         or diag "res = ", explain($res);
                 };
+            }
+        };
+        goto DONE_TESTING if $done_testing;
+
+        subtest "crash during rollback -> tx status X" => sub {
+            $tx_id = UUID::Random::generate();
+            diag "tx_id = $tx_id";
+
+            for my $i (1..$num_actions) {
+                $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
+                unless (is($res->[0], 200, "begin_tx succeeds")) {
+                    diag "res = ", explain($res);
+                    goto DONE_TESTING;
+                }
+
+                subtest "crash at rollback #$i" => sub {
+                    my $ja = 0;
+                    my $jr = 0;
+                    local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
+                        my ($self, %args) = @_;
+                        my $nl = $self->{_action_nest_level}//0;
+                        return unless $nl <= ($has_do_actions ? 2:1);
+                        if ($args{which} eq 'action') {
+                            # we need to trigger the rollback first, after last
+                            # action
+                            return unless ++$ja == $num_actions;
+                            for ("CRASH DURING ACTION") {$log->trace($_);die $_}
+                        }
+                        $jr++ if $args{which} eq 'rollback';
+                        if ($jr == $i) {
+                            for("CRASH DURING ROLLBACK"){$log->trace($_);die $_}
+                        }
+                    };
+                    eval {
+                        $res = $pa->request(call=>$uri,
+                                            {args=>$fargs,tx_id=>$tx_id});
+                    };
+
+                    # doesn't die, trapped by eval{} in _action_loop. there's
+                    # also eval{} placed by periwrap
+                    #ok($@, "dies") or diag "res = ", explain($res);
+
+                    # reinit TM / recover
+                    $tm = Perinci::Tx::Manager->new(
+                        data_dir => "$tmpdir/.tx", pa => $pa);
+                    $res = $tm->list(tx_id=>$tx_id, detail=>1);
+                    is($res->[0], 200, "list() succeeds");
+                    is(scalar(@{$res->[2]}), 1, "transaction is found");
+                    is($res->[2][0]{tx_status}, 'X', "transaction status is X")
+                        or diag "res = ", explain($res);
+                };
+
+                $targs{reset_state}->();
             }
         };
         goto DONE_TESTING if $done_testing;
@@ -134,7 +192,7 @@ sub test_tx_action {
         };
         goto DONE_TESTING if $done_testing;
 
-        subtest "repeat action = noop (idempotent), rollback" => sub {
+        subtest "repeat action -> noop (idempotent), rollback" => sub {
             $tx_id = UUID::Random::generate();
             diag "tx_id = $tx_id";
             $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
@@ -196,6 +254,12 @@ Fully-qualified name of transactional function, e.g. C<Setup::File::setup_file>.
 
 Arguments to feed to transactional function (via $tm->call()).
 
+=item * reset_state* => CODE
+
+The code to reset to initial state. This is called at the start of tests, as
+well as after each rollback crash test, because crash during rollback causes the
+state to become inconsistent.
+
 =item * status => INT (default: 200)
 
 Expect $tm->call() to return this status.
@@ -208,214 +272,4 @@ function.
 
 =back
 
-TODO:
-- repeat fix state, to check idempotence
-- change state after commit, to test failing undo
-- change state after undo, to test failing redo
-
 =cut
-
-__END__
-        subtest "before setup" => sub {
-            $chku->();
-            done_testing;
-        };
-        goto END_TESTS unless Test::More->builder->is_passing;
-
-        subtest "do (dry run)" => sub {
-            my %fargs = (%$fargs,  -undo_action=>'do', -tx_manager=>$tm,
-                         -dry_run=>1);
-            $res = $func->(%fargs);
-            if ($targs{dry_do_error}) {
-                is($res->[0], $targs{dry_do_error},
-                   "status is $targs{dry_do_error}");
-                $exit++;
-            } else {
-                if (is($res->[0], 200, "status 200")) {
-                    $chku->();
-                    $undo_data = $res->[3]{undo_data};
-                    ok($undo_data, "function returns undo_data");
-                } else {
-                    diag "res = ", explain($res);
-                };
-            }
-            done_testing;
-        };
-        goto END_TESTS if $exit;
-        goto END_TESTS unless Test::More->builder->is_passing;
-
-        subtest "do" => sub {
-            my %fargs = (%$fargs,  -undo_action=>'do', -tx_manager=>$tm);
-            $res = $func->(%fargs);
-            if ($targs{do_error}) {
-                is($res->[0], $targs{do_error},
-                   "status is $targs{do_error}");
-                $exit++;
-            } else {
-                if (is($res->[0], 200, "status 200")) {
-                    $chks->();
-                    $undo_data = $res->[3]{undo_data};
-                    ok($undo_data, "function returns undo_data");
-                } else {
-                    diag "res = ", explain($res);
-                }
-            }
-            done_testing;
-        };
-        goto END_TESTS unless Test::More->builder->is_passing;
-
-        subtest "repeat do -> noop (idempotent)" => sub {
-            my %fargs = (%$fargs,  -undo_action=>'do', -tx_manager=>$tm);
-            $res = $func->(%fargs);
-            if (is($res->[0], 304, "status 304")) {
-                $chks->();
-            } else {
-                diag "res = ", explain($res);
-            }
-            done_testing;
-        };
-        goto END_TESTS unless Test::More->builder->is_passing;
-
-        if ($targs{set_state1} && $targs{check_state1}) {
-            $targs{set_state1}->();
-            subtest "undo after state changed" => sub {
-                my %fargs = (%$fargs, -undo_action=>'undo', -tx_manager=>$tm,
-                             -undo_data=>$undo_data);
-                $res = $func->(%fargs);
-                $targs{check_state1}->();
-                done_testing;
-            };
-            goto END_TESTS;
-        }
-
-        subtest "undo (dry run)" => sub {
-            my %fargs = (%$fargs, -undo_action=>'undo', -undo_data=>$undo_data,
-                         -tx_manager=>$tm, -dry_run=>1);
-            $res = $func->(%fargs);
-            if (is($res->[0], 200, "status 200")) {
-                $chks->();
-            } else {
-                diag "res = ", explain($res);
-            }
-            done_testing;
-        };
-        goto END_TESTS unless Test::More->builder->is_passing;
-
-        subtest "undo" => sub {
-            my %fargs = (%$fargs, -undo_action=>'undo', -undo_data=>$undo_data,
-                         -tx_manager=>$tm);
-            $res = $func->(%fargs);
-            if (is($res->[0], 200, "status 200")) {
-                $chku->();
-                $redo_data = $res->[3]{undo_data};
-                ok($redo_data, "function returns undo_data (for redo)");
-            } else {
-                diag "res = ", explain($res);
-            }
-            done_testing;
-        };
-        goto END_TESTS unless Test::More->builder->is_passing;
-
-        # note: repeat undo is NOT guaranteed to be noop, not idempotent here
-        # because we rely on undo data which will refuse to apply changes if
-        # state has changed.
-
-        if ($targs{set_state2} && $targs{check_state2}) {
-            $targs{set_state2}->();
-            subtest "redo after state changed" => sub {
-                my %fargs = (%$fargs, -undo_action=>'undo',
-                             -undo_data=>$redo_data, -tx_manager=>$tm);
-                $res = $func->(%fargs);
-                $targs{check_state2}->();
-                done_testing;
-            };
-            goto END_TESTS;
-        }
-
-        subtest "redo (dry run)" => sub {
-            my %fargs = (%$fargs, -undo_action=>'undo', -undo_data=>$redo_data,
-                         -tx_manager=>$tm, -dry_run=>1);
-            $res = $func->(%fargs);
-            if (is($res->[0], 200, "status 200")) {
-                $chku->();
-            } else {
-                diag "res = ", explain($res);
-            }
-            done_testing;
-        };
-        goto END_TESTS unless Test::More->builder->is_passing;
-
-        subtest "redo" => sub {
-            my %fargs = (%$fargs, -undo_action=>'undo', -undo_data=>$redo_data,
-                         -tx_manager=>$tm);
-            $res = $func->(%fargs);
-            if (is($res->[0], 200, "status 200")) {
-                $chks->();
-                $undo_data2 = $res->[3]{undo_data};
-                ok($undo_data2,"function returns undo_data (for undoing redo)");
-            } else {
-                diag "res = ", explain($res);
-            }
-            done_testing;
-        };
-        goto END_TESTS unless Test::More->builder->is_passing;
-
-        # note: repeat redo is NOT guaranteed to be noop.
-
-        subtest "undo redo (dry run)" => sub {
-            my %fargs = (%$fargs, -undo_action=>'undo', -undo_data=>$undo_data2,
-                         -tx_manager=>$tm, -dry_run=>1);
-            $res = $func->(%fargs);
-            if (is($res->[0], 200, "status 200")) {
-                $chks->();
-            } else {
-                diag "res = ", explain($res);
-            }
-            done_testing;
-        };
-        goto END_TESTS unless Test::More->builder->is_passing;
-
-        subtest "undo redo" => sub {
-            my %fargs = (%$fargs, -undo_action=>'undo',
-                         -undo_data=>$undo_data2, -tx_manager=>$tm);
-            $res = $func->(%fargs);
-            if (is($res->[0], 200, "status 200")) {
-                $chku->();
-                #$redo_data2 = $res->[3]{undo_data};
-                #ok($redo_data2, "function returns undo_data");
-            } else {
-                diag "res = ", explain($res);
-            }
-            done_testing;
-        };
-        goto END_TESTS unless Test::More->builder->is_passing;
-
-        # note: repeat undo redo is NOT guaranteed to be noop.
-
-        ## can no longer be done, perigen-undo 0.25+ requires tx
-        #subtest "normal (without undo) (dry run)" => sub {
-        #    my %fargs = (%$fargs,
-        #                 -dry_run=>1);
-        #    $res = $func->(%fargs);
-        #    $chku->();
-        #    done_testing;
-        #};
-        #goto END_TESTS unless Test::More->builder->is_passing;
-        #
-        #subtest "normal (without undo)" => sub {
-        #    my %fargs = (%$fargs);
-        #    $res = $func->(%fargs);
-        #    $chks->();
-        #    done_testing;
-        #};
-        #goto END_TESTS unless Test::More->builder->is_passing;
-        #
-        #subtest "repeat normal -> noop (idempotent)" => sub {
-        #    my %fargs = (%$fargs);
-        #    $res = $func->(%fargs);
-        #    $chks->();
-        #    is($res->[0], 304, "status 304");
-        #    done_testing;
-        #};
-        #goto END_TESTS unless Test::More->builder->is_passing;
-

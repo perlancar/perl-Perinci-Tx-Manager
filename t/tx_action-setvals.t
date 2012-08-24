@@ -19,6 +19,7 @@ test_tx_action(
     tmpdir => $tmpdir,
     f      => 'TestTx::setvals',
     args   => {values=>{a=>1, b=>2, c=>3}},
+    reset_state => sub { %TestTx::vals = () },
 );
 
 DONE_TESTING:
