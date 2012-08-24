@@ -69,6 +69,68 @@ sub test_tx_action {
         }
         diag "number of actions: $num_actions";
 
+        subtest "normal action + commit" => sub {
+            $tx_id = UUID::Random::generate();
+            diag "tx_id = $tx_id";
+            $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
+            unless (is($res->[0], 200, "begin_tx succeeds")) {
+                diag "res = ", explain($res);
+                goto DONE_TESTING;
+            }
+
+            $res = $pa->request(call => $uri, {args => $fargs, tx_id=>$tx_id});
+            $estatus = $targs{status} // 200;
+            unless(is($res->[0], $estatus, "status is $estatus")) {
+                diag "res = ", explain($res);
+                goto DONE_TESTING;
+            }
+            do { $done_testing++; return } unless $estatus == 200;
+
+            $res = $pa->request(commit_tx => "/", {tx_id=>$tx_id});
+            unless(is($res->[0], 200, "commit_tx succeeds")) {
+                diag "res = ", explain($res);
+                goto DONE_TESTING;
+            }
+        };
+        goto DONE_TESTING if $done_testing;
+
+        subtest "repeat action -> noop (idempotent), rollback" => sub {
+            $tx_id = UUID::Random::generate();
+            diag "tx_id = $tx_id";
+            $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
+            unless (is($res->[0], 200, "begin_tx succeeds")) {
+                diag "res = ", explain($res);
+                goto DONE_TESTING;
+            }
+            $res = $pa->request(call => $uri, {args => $fargs, tx_id=>$tx_id});
+            unless(is($res->[0], 304, "status is 304")) {
+                diag "res = ", explain($res);
+                goto DONE_TESTING;
+            }
+
+            $res = $pa->request(rollback_tx => "/", {tx_id=>$tx_id});
+            unless(is($res->[0], 200, "rollback_tx succeeds")) {
+                diag "res = ", explain($res);
+                goto DONE_TESTING;
+            }
+        };
+        goto DONE_TESTING if $done_testing;
+
+        # TODO
+        subtest "undo" => sub { ok 1 };
+        goto DONE_TESTING if $done_testing;
+
+        # TODO
+        subtest "redo" => sub { ok 1 };
+        goto DONE_TESTING if $done_testing;
+
+        # TODO
+        subtest "undo #2" => sub { ok 1 };
+        goto DONE_TESTING if $done_testing;
+
+        # TMP
+        $targs{reset_state}->();
+
         subtest "crash during performing action -> rollback" => sub {
             $tx_id = UUID::Random::generate();
             diag "tx_id = $tx_id";
@@ -163,53 +225,6 @@ sub test_tx_action {
                 };
 
                 $targs{reset_state}->();
-            }
-        };
-        goto DONE_TESTING if $done_testing;
-
-        subtest "normal action + commit" => sub {
-            $tx_id = UUID::Random::generate();
-            diag "tx_id = $tx_id";
-            $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
-            unless (is($res->[0], 200, "begin_tx succeeds")) {
-                diag "res = ", explain($res);
-                goto DONE_TESTING;
-            }
-
-            $res = $pa->request(call => $uri, {args => $fargs, tx_id=>$tx_id});
-            $estatus = $targs{status} // 200;
-            unless(is($res->[0], $estatus, "status is $estatus")) {
-                diag "res = ", explain($res);
-                goto DONE_TESTING;
-            }
-            do { $done_testing++; return } unless $estatus == 200;
-
-            $res = $pa->request(commit_tx => "/", {tx_id=>$tx_id});
-            unless(is($res->[0], 200, "commit_tx succeeds")) {
-                diag "res = ", explain($res);
-                goto DONE_TESTING;
-            }
-        };
-        goto DONE_TESTING if $done_testing;
-
-        subtest "repeat action -> noop (idempotent), rollback" => sub {
-            $tx_id = UUID::Random::generate();
-            diag "tx_id = $tx_id";
-            $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
-            unless (is($res->[0], 200, "begin_tx succeeds")) {
-                diag "res = ", explain($res);
-                goto DONE_TESTING;
-            }
-            $res = $pa->request(call => $uri, {args => $fargs, tx_id=>$tx_id});
-            unless(is($res->[0], 304, "status is 304")) {
-                diag "res = ", explain($res);
-                goto DONE_TESTING;
-            }
-
-            $res = $pa->request(rollback_tx => "/", {tx_id=>$tx_id});
-            unless(is($res->[0], 200, "rollback_tx succeeds")) {
-                diag "res = ", explain($res);
-                goto DONE_TESTING;
             }
         };
         goto DONE_TESTING if $done_testing;
