@@ -788,7 +788,7 @@ sub _recover {
 
     # continue interrupted redo
     $sth = $dbh->prepare(
-        "SELECT * FROM tx WHERE status IN ('u') ".
+        "SELECT * FROM tx WHERE status IN ('d') ".
                 "ORDER BY ctime ASC",
     );
     $sth->execute or return "db: Can't select tx: ".$dbh->errstr;
