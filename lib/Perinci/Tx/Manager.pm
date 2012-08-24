@@ -913,7 +913,8 @@ sub _wrap {
         $res = $wargs{code}->(%$margs, _tx=>$cur_tx);
         # on error, rollback and skip the rest
         if ($res->[0] >= 400) {
-            $self->_rollback if $wargs{rollback} // 1;
+            $self->_rollback if $wargs{rollback} // 1
+                && ($res->[3]{rollback} // 1);
             return $res;
         }
     }
@@ -1028,7 +1029,7 @@ sub action {
                             undef,
                             {tx_result=>$res}];
                 } else {
-                    return $res;
+                    return [532, $res];
                 }
             } else {
                 return [$self->{_res}[0], $self->{_res}[1],
