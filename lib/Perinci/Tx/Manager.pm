@@ -475,7 +475,7 @@ sub _collect_stash {
 
 # return undef on success, or error message string
 sub _perform_action {
-    my ($self, $which, $action) = @_;
+    my ($self, $which, $action, $opts) = @_;
     my $res;
 
     my $dbh = $self->{_dbh};
@@ -484,6 +484,7 @@ sub _perform_action {
     my %args = %{$action->[1]};
     $args{-tx_v} = $proto_v;
     $args{-tx_is_rollback} = 1 if $which eq 'rollback';
+    $args{-confirm} = 1 if $opts->{confirm};
     my $dd = $action->[5]{deps} // {};
     if ($dd->{tmp_dir}) { # XXX actually need to use dep_satisfy_rel
         $res = $self->get_tmp_dir;
@@ -576,7 +577,7 @@ sub _perform_action {
             $_hooks{$_}->($self, which=>$which, actions=>$do_actions);
         }
 
-        $res = $self->_action($do_actions);
+        $res = $self->_action($do_actions, $opts);
         return $res if $res;
 
         for ('after_inner_action') {
@@ -674,7 +675,7 @@ sub _action_loop {
             $i++;
             local $lp = "$lp [action #$i/".scalar(@$actions)." ($action->[0])]";
             local $ep = "action #$i/".scalar(@$actions)." ($action->[0])";
-            $res = $self->_perform_action($which, $action);
+            $res = $self->_perform_action($which, $action, $opts);
             return $res if $res;
         }
 
@@ -694,7 +695,7 @@ sub _action_loop {
                      {}, $tx->{ser_id});
             return $eval_err;
         } elsif (!$opts->{rollback} || ($self->{_action_nest_level}//0) > 1) {
-            # do not rollback nested action
+            # do not rollback nested action or if told not to rollback
             return $eval_err;
         } else {
             my $rbres = $self->_rollback;
@@ -999,8 +1000,8 @@ sub begin {
 
 # return undef on success, or error message string
 sub _action {
-    my ($self, $actions) = @_;
-    $self->_action_loop('action', $actions);
+    my ($self, $actions, $opts) = @_;
+    $self->_action_loop('action', $actions, $opts);
 }
 
 # old name, for backward compatibility
@@ -1028,7 +1029,7 @@ sub action {
             }
 
             delete $self->{_res};
-            my $res = $self->_action($actions);
+            my $res = $self->_action($actions, {confirm=>$args{confirm}});
             if ($res) {
                 if ($self->{_res} && $self->{_res}[0] !~ /200|304/) {
                     return [$self->{_res}[0],
@@ -1086,11 +1087,11 @@ sub _rollback {
 
 # return undef on success, or error message string
 sub _undo {
-    my ($self) = @_;
+    my ($self, $opts) = @_;
     my $dbh = $self->{_dbh};
     my $tx  = $self->{_cur_tx};
 
-    my $res = $self->_action_loop('undo');
+    my $res = $self->_action_loop('undo', undef, $opts);
     return $res if $res;
     $dbh->do("DELETE FROM undo_action WHERE tx_ser_id=?", {}, $tx->{ser_id});
     return;
@@ -1098,11 +1099,11 @@ sub _undo {
 
 # return undef on success, or error message string
 sub _redo {
-    my ($self) = @_;
+    my ($self, $opts) = @_;
     my $dbh = $self->{_dbh};
     my $tx  = $self->{_cur_tx};
 
-    my $res = $self->_action_loop('redo');
+    my $res = $self->_action_loop('redo', undef, $opts);
     return $res if $res;
     $dbh->do("DELETE FROM do_action WHERE tx_ser_id=?", {}, $tx->{ser_id});
     return;
@@ -1190,7 +1191,7 @@ sub undo {
         tx_status => ["C"],
         rollback => 0, # _action_loop already does rollback
         code => sub {
-            my $res = $self->_undo;
+            my $res = $self->_undo({confirm=>$args{confirm}});
             $res ? [532, $res] : [200, "OK"];
         },
     );
@@ -1214,7 +1215,7 @@ sub redo {
         tx_status => ["U"],
         rollback => 0, # _action_loop already does rollback
         code => sub {
-            my $res = $self->_redo;
+            my $res = $self->_redo({confirm=>$args{confirm}});
             $res ? [532, $res] : [200, "OK"];
         },
     );
@@ -1383,7 +1384,9 @@ Perform action for the transaction by calling one or more functions.
 
 Arguments: C<f> (fully-qualified function name), C<args> (arguments to function,
 hashref). Or, C<actions> (list of function calls, array, C<[[f1, args1], ...]>,
-alternative to specifying C<f> and C<args>).
+alternative to specifying C<f> and C<args>), C<confirm> (bool, if set to true
+then will pass C<< -confirm => 1 >> special argument to functions; see status
+code 331 in L<Rinci::function> for more details on this).
 
 To perform a single action, specify C<f> and C<args>. To perform several
 actions, supply C<actions>.
@@ -1446,13 +1449,17 @@ Currently not implemented.
 
 Undo a committed transaction.
 
-Arguments: C<tx_id>
+Arguments: C<tx_id>, C<confirm> (bool, if set to true then will pass C<<
+-confirm => 1 >> special argument to functions; see status code 331
+in L<Rinci::function> for more details on this).
 
 =head2 $tx->redo(%args) => RESP
 
 Redo an undone committed transaction.
 
-Arguments: C<tx_id>
+Arguments: C<tx_id>, C<confirm> (bool, if set to true then will pass C<<
+-confirm => 1 >> special argument to functions; see status code 331
+in L<Rinci::function> for more details on this).
 
 =head2 $tx->list(%args) => RESP
 

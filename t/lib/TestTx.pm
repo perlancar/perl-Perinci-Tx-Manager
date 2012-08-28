@@ -131,4 +131,42 @@ sub setvals {
     }
 }
 
+$SPEC{emptyvals} = {
+    v => 1.1,
+    summary => 'Unset all variables',
+    args => {
+        values => {
+            schema => 'hash*',
+        },
+    },
+    features => {
+        tx => {v=>2},
+        idempotent => 1,
+    },
+};
+sub emptyvals {
+    my %args = @_;
+
+    my $tx_action = $args{-tx_action} // '';
+
+    return [331, "Are you sure you want to empty all values?"]
+        unless $args{-confirm};
+
+    if ($tx_action eq 'check_state') {
+        my @undo;
+        for my $name (keys %vals) {
+            push @undo, [setval => {name=>$name, value=>$vals{$name}}];
+        }
+        if (@undo) {
+            return [200, "Fixable", undef, {undo_actions=>\@undo}];
+        } else {
+            return [304, "Fixed"];
+        }
+    } elsif ($tx_action eq 'fix_state') {
+        %vals = ();
+        return [200, "Fixed"];
+    }
+    [400, "Invalid -tx_action"];
+}
+
 1;

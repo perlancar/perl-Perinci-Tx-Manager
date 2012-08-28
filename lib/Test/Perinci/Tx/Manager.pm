@@ -85,7 +85,8 @@ sub test_tx_action {
                 goto DONE_TESTING;
             }
 
-            $res = $pa->request(call => $uri, {args => $fargs, tx_id=>$tx_id});
+            $res = $pa->request(call => $uri, {
+                args => $fargs, tx_id=>$tx_id, confirm=>$targs{confirm}});
             $estatus = $targs{status} // 200;
             unless(is($res->[0], $estatus, "status is $estatus")) {
                 diag "res = ", explain($res);
@@ -106,7 +107,8 @@ sub test_tx_action {
         subtest "repeat action -> noop (idempotent), rollback" => sub {
             $tx_id = UUID::Random::generate();
             $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
-            $res = $pa->request(call => $uri, {args => $fargs, tx_id=>$tx_id});
+            $res = $pa->request(call => $uri, {
+                args => $fargs, tx_id=>$tx_id, confirm=>$targs{confirm}});
             unless(is($res->[0], 304, "status is 304")) {
                 diag "res = ", explain($res);
                 goto DONE_TESTING;
@@ -169,6 +171,7 @@ sub test_tx_action {
                 };
 
             }
+            ok 1 if !$num_actions;
         };
         goto DONE_TESTING if $done_testing;
 
@@ -214,6 +217,7 @@ sub test_tx_action {
                 };
                 $reset_state->();
             }
+            ok 1 if !$num_actions;
         };
         goto DONE_TESTING if $done_testing;
 
@@ -251,7 +255,8 @@ sub test_tx_action {
                 # first create a committed transaction
                 $pa->request(discard_tx=>"/", {tx_id=>$tx_id});
                 $pa->request(begin_tx  => "/", {tx_id=>$tx_id});
-                $pa->request(call => $uri, {args=>$fargs, tx_id=>$tx_id});
+                $pa->request(call => $uri, {
+                    args=>$fargs, tx_id=>$tx_id, confirm=>$targs{confirm}});
                 $pa->request(commit_tx => "/", {tx_id=>$tx_id});
                 $res = $tm->list(tx_id=>$tx_id, detail=>1);
                 is($res->[2][0]{tx_status}, 'C', "transaction status is C")
@@ -287,6 +292,7 @@ sub test_tx_action {
                 };
 
             }
+            ok 1 if !$num_undo_actions;
         };
         goto DONE_TESTING if $done_testing;
 
@@ -299,7 +305,8 @@ sub test_tx_action {
                 $reset_state->();
                 $pa->request(discard_tx=>"/", {tx_id=>$tx_id});
                 $pa->request(begin_tx  => "/", {tx_id=>$tx_id});
-                $pa->request(call => $uri, {args=>$fargs, tx_id=>$tx_id});
+                $pa->request(call => $uri, {
+                    args=>$fargs, tx_id=>$tx_id, confirm=>$targs{confirm}});
                 $pa->request(commit_tx => "/", {tx_id=>$tx_id});
                 $res = $tm->list(tx_id=>$tx_id, detail=>1);
                 is($res->[2][0]{tx_status}, 'C', "transaction status is C")
@@ -341,6 +348,7 @@ sub test_tx_action {
                 };
 
             }
+            ok 1 if !$num_undo_actions;
         };
         goto DONE_TESTING if $done_testing;
 
@@ -353,7 +361,8 @@ sub test_tx_action {
                 # first create an undone transaction
                 $pa->request(discard_tx=>"/", {tx_id=>$tx_id});
                 $pa->request(begin_tx  => "/", {tx_id=>$tx_id});
-                $pa->request(call => $uri, {args=>$fargs, tx_id=>$tx_id});
+                $pa->request(call => $uri, {
+                    args=>$fargs, tx_id=>$tx_id, confirm=>$targs{confirm}});
                 $pa->request(commit_tx => "/", {tx_id=>$tx_id});
                 $pa->request(undo => "/", {tx_id=>$tx_id});
                 $res = $tm->list(tx_id=>$tx_id, detail=>1);
@@ -390,6 +399,7 @@ sub test_tx_action {
                 };
 
             }
+            ok 1 if !$num_actions;
         };
         goto DONE_TESTING;
         goto DONE_TESTING if $done_testing;
@@ -403,7 +413,8 @@ sub test_tx_action {
                 $reset_state->();
                 $pa->request(discard_tx=>"/", {tx_id=>$tx_id});
                 $pa->request(begin_tx  => "/", {tx_id=>$tx_id});
-                $pa->request(call => $uri, {args=>$fargs, tx_id=>$tx_id});
+                $pa->request(call => $uri, {
+                    args=>$fargs, tx_id=>$tx_id, confirm=>$targs{confirm}});
                 $pa->request(commit_tx => "/", {tx_id=>$tx_id});
                 $pa->request(undo => "/", {tx_id=>$tx_id});
                 $res = $tm->list(tx_id=>$tx_id, detail=>1);
@@ -446,6 +457,7 @@ sub test_tx_action {
                 };
 
             }
+            ok 1 if !$num_actions;
         };
         goto DONE_TESTING if $done_testing;
 
