@@ -483,7 +483,8 @@ sub _perform_action {
 
     my %args = %{$action->[1]};
     $args{-tx_v} = $proto_v;
-    $args{-tx_is_rollback} = 1 if $which eq 'rollback';
+    $args{-tx_rollback} = 1 if $which eq 'rollback';
+    $args{-tx_recovery} = 1 if $self->{_in_recovery};
     $args{-confirm} = 1 if $opts->{confirm};
     my $dd = $action->[5]{deps} // {};
     if ($dd->{tmp_dir}) { # XXX actually need to use dep_satisfy_rel
@@ -755,6 +756,7 @@ sub _recover {
     my ($self, $which) = @_;
 
     $log->tracef("$lp Performing recovery ...");
+    local $self->{_in_recovery} = 1;
 
     # there should be only one process running
     my $res = $self->_lock_db(undef);
@@ -1387,6 +1389,10 @@ hashref). Or, C<actions> (list of function calls, array, C<[[f1, args1], ...]>,
 alternative to specifying C<f> and C<args>), C<confirm> (bool, if set to true
 then will pass C<< -confirm => 1 >> special argument to functions; see status
 code 331 in L<Rinci::function> for more details on this).
+
+TM will also pass the following special arguments: C<< -tx_v => PROTO_VERSION
+>>, C<< -tx_rollback => 1 >> during rollback, and C<< -tx_recovery => 1 >>
+during recovery, for informative purposes.
 
 To perform a single action, specify C<f> and C<args>. To perform several
 actions, supply C<actions>.
