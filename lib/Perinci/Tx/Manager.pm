@@ -1193,8 +1193,22 @@ sub undo {
         tx_status => ["C"],
         rollback => 0, # _action_loop already does rollback
         code => sub {
+            delete $self->{_res};
             my $res = $self->_undo({confirm=>$args{confirm}});
-            $res ? [532, $res] : [200, "OK"];
+            if ($res) {
+                if ($self->{_res} && $self->{_res}[0] !~ /200|304/) {
+                    return [$self->{_res}[0],
+                            $self->{_res}[1],
+                            undef,
+                            {tx_result=>$res}];
+                } else {
+                    return [532, $res];
+                }
+            } else {
+                return [$self->{_res}[0], $self->{_res}[1],
+                        $self->{_stash}{result},
+                        $self->{_stash}{result_meta}];
+            }
         },
     );
 }
@@ -1217,8 +1231,22 @@ sub redo {
         tx_status => ["U"],
         rollback => 0, # _action_loop already does rollback
         code => sub {
+            delete $self->{_res};
             my $res = $self->_redo({confirm=>$args{confirm}});
-            $res ? [532, $res] : [200, "OK"];
+            if ($res) {
+                if ($self->{_res} && $self->{_res}[0] !~ /200|304/) {
+                    return [$self->{_res}[0],
+                            $self->{_res}[1],
+                            undef,
+                            {tx_result=>$res}];
+                } else {
+                    return [532, $res];
+                }
+            } else {
+                return [$self->{_res}[0], $self->{_res}[1],
+                        $self->{_stash}{result},
+                        $self->{_stash}{result_meta}];
+            }
         },
     );
 }
