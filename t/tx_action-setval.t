@@ -16,10 +16,20 @@ my $tmpdir = tempdir(CLEANUP=>1);
 $CWD = $tmpdir;
 
 test_tx_action(
+    name   => 'fixable',
     tmpdir => $tmpdir,
     f      => 'TestTx::setval',
     args   => {name=>'a', value=>1},
     reset_state => sub { %TestTx::vals = () },
+);
+
+test_tx_action(
+    name   => 'fixed',
+    tmpdir => $tmpdir,
+    f      => 'TestTx::setval',
+    args   => {name=>'a', value=>1},
+    reset_state => sub { %TestTx::vals = (a=>1) },
+    status => 304,
 );
 
 DONE_TESTING:
