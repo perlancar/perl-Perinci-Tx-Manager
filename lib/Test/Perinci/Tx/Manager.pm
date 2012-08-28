@@ -101,7 +101,7 @@ sub test_tx_action {
             }
             $tx_id1 = $tx_id;
         };
-        goto DONE_TESTING if $done_testing;
+        goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
         subtest "repeat action -> noop (idempotent), rollback" => sub {
@@ -120,7 +120,7 @@ sub test_tx_action {
                 goto DONE_TESTING;
             }
         };
-        goto DONE_TESTING if $done_testing;
+        goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
         $targs{before_undo}->() if $targs{before_undo};
@@ -137,7 +137,7 @@ sub test_tx_action {
             is($res->[2][0]{tx_status}, 'U', "transaction status is U")
                 or diag "res = ", explain($res);
         };
-        goto DONE_TESTING if $done_testing;
+        goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
         subtest "crash during action -> rollback" => sub {
@@ -177,7 +177,7 @@ sub test_tx_action {
             }
             ok 1 if !$num_actions;
         };
-        goto DONE_TESTING if $done_testing;
+        goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
         subtest "crash during rollback -> tx status X" => sub {
@@ -223,7 +223,7 @@ sub test_tx_action {
             }
             ok 1 if !$num_actions;
         };
-        goto DONE_TESTING if $done_testing;
+        goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
         subtest "redo" => sub {
@@ -237,7 +237,7 @@ sub test_tx_action {
             is($res->[2][0]{tx_status}, 'C', "transaction status is C")
                 or diag "res = ", explain($res);
         };
-        goto DONE_TESTING if $done_testing;
+        goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
         $targs{before_undo}->() if $targs{before_undo};
@@ -252,7 +252,7 @@ sub test_tx_action {
             is($res->[2][0]{tx_status}, 'U', "transaction status is U")
                 or diag "res = ", explain($res);
         };
-        goto DONE_TESTING if $done_testing;
+        goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
         subtest "crash while undo -> roll forward" => sub {
@@ -301,7 +301,7 @@ sub test_tx_action {
             }
             ok 1 if !$num_undo_actions;
         };
-        goto DONE_TESTING if $done_testing;
+        goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
         subtest "crash while roll forward failed undo -> tx status X" => sub {
@@ -357,7 +357,7 @@ sub test_tx_action {
             }
             ok 1 if !$num_undo_actions;
         };
-        goto DONE_TESTING if $done_testing;
+        goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
         subtest "crash while redo -> roll forward" => sub {
@@ -408,8 +408,7 @@ sub test_tx_action {
             }
             ok 1 if !$num_actions;
         };
-        goto DONE_TESTING;
-        goto DONE_TESTING if $done_testing;
+        goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
         subtest "crash while roll forward failed redo -> tx status X" => sub {
@@ -466,7 +465,7 @@ sub test_tx_action {
             }
             ok 1 if !$num_actions;
         };
-        goto DONE_TESTING if $done_testing;
+        goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
       DONE_TESTING:
