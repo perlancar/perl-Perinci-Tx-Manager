@@ -123,12 +123,16 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing;
 
 
+        $targs{before_undo}->() if $targs{before_undo};
         subtest "undo" => sub {
-            $res = $pa->request(undo => "/", {tx_id=>$tx_id1});
-            unless (is($res->[0], 200, "undo succeeds")) {
+            $res = $pa->request(undo => "/", {
+                tx_id=>$tx_id1, confirm=>$targs{confirm}});
+            $estatus = $targs{undo_status} // 200;
+            unless(is($res->[0], $estatus, "status is $estatus")) {
                 diag "res = ", explain($res);
                 goto DONE_TESTING;
             }
+            do { $done_testing++; return } unless $estatus == 200;
             $res = $tm->list(tx_id=>$tx_id1, detail=>1);
             is($res->[2][0]{tx_status}, 'U', "transaction status is U")
                 or diag "res = ", explain($res);
@@ -223,7 +227,8 @@ sub test_tx_action {
 
 
         subtest "redo" => sub {
-            $res = $pa->request(redo => "/", {tx_id=>$tx_id1});
+            $res = $pa->request(redo => "/", {
+                tx_id=>$tx_id1, confirm=>$targs{confirm}});
             unless (is($res->[0], 200, "redo succeeds")) {
                 diag "res = ", explain($res);
                 goto DONE_TESTING;
@@ -235,8 +240,10 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing;
 
 
+        $targs{before_undo}->() if $targs{before_undo};
         subtest "undo #2" => sub {
-            $res = $pa->request(undo => "/", {tx_id=>$tx_id1});
+            $res = $pa->request(undo => "/", {
+                tx_id=>$tx_id1, confirm=>$targs{confirm}});
             unless (is($res->[0], 200, "undo succeeds")) {
                 diag "res = ", explain($res);
                 goto DONE_TESTING;
