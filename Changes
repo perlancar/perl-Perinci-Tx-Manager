@@ -1,5 +1,12 @@
 Revision history for Perinci-Tx-Manager
 
+0.33     2012-08-25 (SHARYANTO)
+
+         Pass special arguments to functions: '-tx_recovery' => 1 when during
+         recovery, and '-tx_rollback' => 1 when during rollback, for informative
+         purposes.
+
+
 0.32     2012-08-25 (SHARYANTO)
 
          Implement confirmation (Rinci 1.1.27). Pass 'confirm' => 1 to action()
