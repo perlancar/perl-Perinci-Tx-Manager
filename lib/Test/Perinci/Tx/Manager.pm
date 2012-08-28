@@ -102,7 +102,7 @@ sub test_tx_action {
             $tx_id1 = $tx_id;
         };
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
-
+        $targs{after_do}->() if $targs{after_do};
 
         subtest "repeat action -> noop (idempotent), rollback" => sub {
             $tx_id = UUID::Random::generate();
