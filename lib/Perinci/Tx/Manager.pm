@@ -1205,9 +1205,7 @@ sub undo {
                     return [532, $res];
                 }
             } else {
-                return [$self->{_res}[0], $self->{_res}[1],
-                        $self->{_stash}{result},
-                        $self->{_stash}{result_meta}];
+                return [200, "OK"];
             }
         },
     );
@@ -1243,9 +1241,7 @@ sub redo {
                     return [532, $res];
                 }
             } else {
-                return [$self->{_res}[0], $self->{_res}[1],
-                        $self->{_stash}{result},
-                        $self->{_stash}{result_meta}];
+                return [200, "OK"];
             }
         },
     );
