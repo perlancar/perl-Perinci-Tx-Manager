@@ -1,5 +1,13 @@
 Revision history for Perinci-Tx-Manager
 
+0.34     2012-08-25 (SHARYANTO)
+
+         - test_tx_action(): Add 'before_undo' parameter for testing change of
+           state between do and undo.
+
+         - Nicer error message for undo() & redo(), like action().
+
+
 0.33     2012-08-25 (SHARYANTO)
 
          Pass special arguments to functions: '-tx_recovery' => 1 when during
