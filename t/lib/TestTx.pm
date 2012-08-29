@@ -120,8 +120,8 @@ sub setvals {
             unless $res->[0] == 200 || $res->[0] == 304;
         next if $res->[0] == 304;
         #use Data::Dump; dd $res;
-        push @do, [setval => {name=>$name, value=>$value}];
-        push @undo, @{$res->[3]{undo_actions}};
+        push    @do  , [setval => {name=>$name, value=>$value}];
+        unshift @undo, @{$res->[3]{undo_actions}};
     }
 
     if (@do) {
@@ -155,7 +155,7 @@ sub emptyvals {
     if ($tx_action eq 'check_state') {
         my @undo;
         for my $name (keys %vals) {
-            push @undo, [setval => {name=>$name, value=>$vals{$name}}];
+            unshift @undo, [setval => {name=>$name, value=>$vals{$name}}];
         }
         if (@undo) {
             return [200, "Fixable", undef, {undo_actions=>\@undo}];
