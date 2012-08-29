@@ -1,5 +1,10 @@
 Revision history for Perinci-Tx-Manager
 
+0.37     2012-08-29 (SHARYANTO)
+
+         No functional changes. Fix a couple SQL syntax error (steven--).
+
+
 0.36     2012-08-29 (SHARYANTO)
 
          Update to Rinci 1.1.28 (pass '-tx_action_id' to function).
