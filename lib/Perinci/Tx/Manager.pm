@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS tx (
     commit_time REAL,
     last_action_id INTEGER,
     UNIQUE (str_id)
+)
 _
                 $dbh->do(<<'_');
 INSERT INTO tx (ser_id,str_id,owner_id,summary,status,ctime,commit_time,last_action_id)
