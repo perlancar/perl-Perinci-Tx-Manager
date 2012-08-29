@@ -1,5 +1,10 @@
 Revision history for Perinci-Tx-Manager
 
+0.36     2012-08-29 (SHARYANTO)
+
+         Update to Rinci 1.1.28 (pass '-tx_action_id' to function).
+
+
 0.35     2012-08-29 (SHARYANTO)
 
          Some fixes and tweaks for Test::Perinci::Tx::Manager.
