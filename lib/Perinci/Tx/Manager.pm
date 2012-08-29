@@ -505,7 +505,7 @@ sub _perform_action {
     $args{-tx_action} = 'check_state';
     $args{-tx_action_id} = UUID::Random::generate();
     $self->{_res} = $res = $action->[4]->(%args);
-    $log->tracef("$lp check_state result: %s", $res);
+    $log->tracef("$lp check_state args: %s, result: %s", \%args, $res);
     return "$ep: Check state failed: $res->[0] - $res->[1]"
         unless $res->[0] == 200 || $res->[0] == 304;
     my $undo_actions = $res->[3]{undo_actions} // [];
@@ -592,7 +592,7 @@ sub _perform_action {
     } elsif ($self->{_res}[0] == 200) {
         $args{-tx_action} = 'fix_state';
         $self->{_res} = $res = $action->[4]->(%args);
-        $log->tracef("$lp fix_state result: %s", $res);
+        $log->tracef("$lp fix_state args: %s, result: %s", \%args, $res);
         return "$ep: action failed: $res->[0] - $res->[1]"
             unless $res->[0] == 200 || $res->[0] == 304;
         $self->_collect_stash($res);
