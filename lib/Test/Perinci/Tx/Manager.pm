@@ -139,6 +139,7 @@ sub test_tx_action {
                 or note "res = ", explain($res);
         };
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
+        $targs{after_undo}->() if $targs{after_undo};
 
 
         subtest "crash during action -> rollback" => sub {
@@ -259,6 +260,7 @@ sub test_tx_action {
                 or note "res = ", explain($res);
         };
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
+        $targs{after_undo}->() if $targs{after_undo};
 
 
         subtest "crash while undo -> roll forward" => sub {
