@@ -71,9 +71,9 @@ sub test_tx_action {
             } else {
                 $num_actions = 1;
             }
-            diag "number of actions: $num_actions";
+            note "number of actions: $num_actions";
             $num_undo_actions = @{ $res->[3]{undo_actions} };
-            diag "number of undo actions: $num_undo_actions";
+            note "number of undo actions: $num_undo_actions";
         }
 
 
@@ -81,7 +81,7 @@ sub test_tx_action {
             $tx_id = UUID::Random::generate();
             $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
             unless (is($res->[0], 200, "begin_tx succeeds")) {
-                diag "res = ", explain($res);
+                note "res = ", explain($res);
                 goto DONE_TESTING;
             }
 
@@ -89,14 +89,14 @@ sub test_tx_action {
                 args => $fargs, tx_id=>$tx_id, confirm=>$targs{confirm}});
             $estatus = $targs{status} // 200;
             unless(is($res->[0], $estatus, "status is $estatus")) {
-                diag "res = ", explain($res);
+                note "res = ", explain($res);
                 goto DONE_TESTING;
             }
             do { $done_testing++; return } unless $estatus == 200;
 
             $res = $pa->request(commit_tx => "/", {tx_id=>$tx_id});
             unless(is($res->[0], 200, "commit_tx succeeds")) {
-                diag "res = ", explain($res);
+                note "res = ", explain($res);
                 goto DONE_TESTING;
             }
             $tx_id1 = $tx_id;
@@ -111,13 +111,13 @@ sub test_tx_action {
             $res = $pa->request(call => $uri, {
                 args => $fargs, tx_id=>$tx_id, confirm=>$targs{confirm}});
             unless(is($res->[0], 304, "status is 304")) {
-                diag "res = ", explain($res);
+                note "res = ", explain($res);
                 goto DONE_TESTING;
             }
 
             $res = $pa->request(rollback_tx => "/", {tx_id=>$tx_id});
             unless(is($res->[0], 200, "rollback_tx succeeds")) {
-                diag "res = ", explain($res);
+                note "res = ", explain($res);
                 goto DONE_TESTING;
             }
         };
@@ -130,13 +130,13 @@ sub test_tx_action {
                 tx_id=>$tx_id1, confirm=>$targs{confirm}});
             $estatus = $targs{undo_status} // 200;
             unless(is($res->[0], $estatus, "status is $estatus")) {
-                diag "res = ", explain($res);
+                note "res = ", explain($res);
                 goto DONE_TESTING;
             }
             do { $done_testing++; return } unless $estatus == 200;
             $res = $tm->list(tx_id=>$tx_id1, detail=>1);
             is($res->[2][0]{tx_status}, 'U', "transaction status is U")
-                or diag "res = ", explain($res);
+                or note "res = ", explain($res);
         };
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
@@ -165,14 +165,14 @@ sub test_tx_action {
 
                     # doesn't die, trapped by eval{} in _action_loop. there's
                     # also eval{} placed by periwrap
-                    #ok($@, "dies") or diag "res = ", explain($res);
+                    #ok($@, "dies") or note "res = ", explain($res);
 
                     # reinit TM / recover
                     $tm = Perinci::Tx::Manager->new(
                         data_dir => "$tmpdir/.tx", pa => $pa);
                     $res = $tm->list(tx_id=>$tx_id, detail=>1);
                     is($res->[2][0]{tx_status}, 'R', "transaction status is R")
-                        or diag "res = ", explain($res);
+                        or note "res = ", explain($res);
                 };
 
             }
@@ -211,14 +211,14 @@ sub test_tx_action {
 
                     # doesn't die, trapped by eval{} in _action_loop. there's
                     # also eval{} placed by periwrap
-                    #ok($@, "dies") or diag "res = ", explain($res);
+                    #ok($@, "dies") or note "res = ", explain($res);
 
                     # reinit TM / recover
                     $tm = Perinci::Tx::Manager->new(
                         data_dir => "$tmpdir/.tx", pa => $pa);
                     $res = $tm->list(tx_id=>$tx_id, detail=>1);
                     is($res->[2][0]{tx_status}, 'X', "transaction status is X")
-                        or diag "res = ", explain($res);
+                        or note "res = ", explain($res);
                 };
                 $reset_state->();
             }
@@ -231,12 +231,12 @@ sub test_tx_action {
             $res = $pa->request(redo => "/", {
                 tx_id=>$tx_id1, confirm=>$targs{confirm}});
             unless (is($res->[0], 200, "redo succeeds")) {
-                diag "res = ", explain($res);
+                note "res = ", explain($res);
                 goto DONE_TESTING;
             }
             $res = $tm->list(tx_id=>$tx_id1, detail=>1);
             is($res->[2][0]{tx_status}, 'C', "transaction status is C")
-                or diag "res = ", explain($res);
+                or note "res = ", explain($res);
         };
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
@@ -246,12 +246,12 @@ sub test_tx_action {
             $res = $pa->request(undo => "/", {
                 tx_id=>$tx_id1, confirm=>$targs{confirm}});
             unless (is($res->[0], 200, "undo succeeds")) {
-                diag "res = ", explain($res);
+                note "res = ", explain($res);
                 goto DONE_TESTING;
             }
             $res = $tm->list(tx_id=>$tx_id1, detail=>1);
             is($res->[2][0]{tx_status}, 'U', "transaction status is U")
-                or diag "res = ", explain($res);
+                or note "res = ", explain($res);
         };
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
@@ -268,7 +268,7 @@ sub test_tx_action {
                 $pa->request(commit_tx => "/", {tx_id=>$tx_id});
                 $res = $tm->list(tx_id=>$tx_id, detail=>1);
                 is($res->[2][0]{tx_status}, 'C', "transaction status is C")
-                    or diag "res = ", explain($res);
+                    or note "res = ", explain($res);
 
                 subtest "crash at undo action #$i" => sub {
                     my $ju = 0;
@@ -289,14 +289,14 @@ sub test_tx_action {
 
                     # doesn't die, trapped by eval{} in _action_loop. there's
                     # also eval{} placed by periwrap
-                    #ok($@, "dies") or diag "res = ", explain($res);
+                    #ok($@, "dies") or note "res = ", explain($res);
 
                     # reinit TM / recover
                     $tm = Perinci::Tx::Manager->new(
                         data_dir => "$tmpdir/.tx", pa => $pa);
                     $res = $tm->list(tx_id=>$tx_id, detail=>1);
                     is($res->[2][0]{tx_status}, 'U', "transaction status is U")
-                        or diag "res = ", explain($res);
+                        or note "res = ", explain($res);
                 };
 
             }
@@ -318,7 +318,7 @@ sub test_tx_action {
                 $pa->request(commit_tx => "/", {tx_id=>$tx_id});
                 $res = $tm->list(tx_id=>$tx_id, detail=>1);
                 is($res->[2][0]{tx_status}, 'C', "transaction status is C")
-                    or diag "res = ", explain($res);
+                    or note "res = ", explain($res);
 
                 subtest "crash at rollback action #$i" => sub {
                     my $ju = 0; my $jrb = 0;
@@ -345,14 +345,14 @@ sub test_tx_action {
 
                     # doesn't die, trapped by eval{} in _action_loop. there's
                     # also eval{} placed by periwrap
-                    #ok($@, "dies") or diag "res = ", explain($res);
+                    #ok($@, "dies") or note "res = ", explain($res);
 
                     # reinit TM / recover
                     $tm = Perinci::Tx::Manager->new(
                         data_dir => "$tmpdir/.tx", pa => $pa);
                     $res = $tm->list(tx_id=>$tx_id, detail=>1);
                     is($res->[2][0]{tx_status}, 'X', "transaction status is X")
-                        or diag "res = ", explain($res);
+                        or note "res = ", explain($res);
                 };
 
             }
@@ -375,7 +375,7 @@ sub test_tx_action {
                 $pa->request(undo => "/", {tx_id=>$tx_id});
                 $res = $tm->list(tx_id=>$tx_id, detail=>1);
                 is($res->[2][0]{tx_status}, 'U', "transaction status is U")
-                    or diag "res = ", explain($res);
+                    or note "res = ", explain($res);
 
                 subtest "crash at redo action #$i" => sub {
                     my $jrd = 0;
@@ -396,14 +396,14 @@ sub test_tx_action {
 
                     # doesn't die, trapped by eval{} in _action_loop. there's
                     # also eval{} placed by periwrap
-                    #ok($@, "dies") or diag "res = ", explain($res);
+                    #ok($@, "dies") or note "res = ", explain($res);
 
                     # reinit TM / recover
                     $tm = Perinci::Tx::Manager->new(
                         data_dir => "$tmpdir/.tx", pa => $pa);
                     $res = $tm->list(tx_id=>$tx_id, detail=>1);
                     is($res->[2][0]{tx_status}, 'C', "transaction status is C")
-                        or diag "res = ", explain($res);
+                        or note "res = ", explain($res);
                 };
 
             }
@@ -426,7 +426,7 @@ sub test_tx_action {
                 $pa->request(undo => "/", {tx_id=>$tx_id});
                 $res = $tm->list(tx_id=>$tx_id, detail=>1);
                 is($res->[2][0]{tx_status}, 'U', "transaction status is U")
-                    or diag "res = ", explain($res);
+                    or note "res = ", explain($res);
 
                 subtest "crash at rollback action #$i" => sub {
                     my $jrd = 0; my $jrb = 0;
@@ -453,14 +453,14 @@ sub test_tx_action {
 
                     # doesn't die, trapped by eval{} in _action_loop. there's
                     # also eval{} placed by periwrap
-                    #ok($@, "dies") or diag "res = ", explain($res);
+                    #ok($@, "dies") or note "res = ", explain($res);
 
                     # reinit TM / recover
                     $tm = Perinci::Tx::Manager->new(
                         data_dir => "$tmpdir/.tx", pa => $pa);
                     $res = $tm->list(tx_id=>$tx_id, detail=>1);
                     is($res->[2][0]{tx_status}, 'X', "transaction status is X")
-                        or diag "res = ", explain($res);
+                        or note "res = ", explain($res);
                 };
 
             }
