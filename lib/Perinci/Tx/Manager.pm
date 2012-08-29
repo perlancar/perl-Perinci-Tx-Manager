@@ -463,7 +463,7 @@ sub _get_actions_from_db {
                      "ORDER BY ctime, id", {}, $tx->{ser_id});
     $actions = [reverse @$actions];
     $log->tracef("$lp Actions to perform: %s",
-                 [map {[$_->[0], $_->[1]]} @$actions]);
+                 [map {[$_->[0], $_->[2]]} @$actions]);
     $actions;
 }
 
