@@ -184,11 +184,14 @@ sub test_tx_action {
         subtest "crash during rollback -> tx status X" => sub {
             $tx_id = UUID::Random::generate();
 
-            for my $i (1..$num_actions) {
+            my $i = 0;
+            my $last;
+            while (1) {
+                $i++;
+                last if $last;
                 $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
                 subtest "crash at rollback #$i" => sub {
-                    my $ja = 0;
-                    my $jrb = 0;
+                    my $ja = 0; my $jrb = 0; my $crashed;
                     local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
                         my ($self, %args) = @_;
                         my $nl = $self->{_action_nest_level} // 0;
@@ -196,18 +199,21 @@ sub test_tx_action {
                         if ($args{which} eq 'action') {
                             # we need to trigger the rollback first, after last
                             # action
-                            return unless ++$ja == $num_actions;
+                            return unless ++$ja >= $num_actions;
                             for ("CRASH DURING ACTION") {$log->trace($_);die $_}
                         }
                         $jrb++ if $args{which} eq 'rollback';
                         if ($jrb == $i) {
-                            for("CRASH DURING ROLLBACK"){$log->trace($_);die $_}
+                            for("CRASH DURING ROLLBACK"){
+                                $crashed++; $log->trace($_); die $_;
+                            }
                         }
                     };
                     eval {
                         $res = $pa->request(call=>$uri,
                                             {args=>$fargs,tx_id=>$tx_id});
                     };
+                    do { ok 1; $last++; return } unless $crashed;
 
                     # doesn't die, trapped by eval{} in _action_loop. there's
                     # also eval{} placed by periwrap
@@ -222,7 +228,6 @@ sub test_tx_action {
                 };
                 $reset_state->();
             }
-            ok 1 if !$num_actions;
         };
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
@@ -307,7 +312,12 @@ sub test_tx_action {
 
         subtest "crash while roll forward failed undo -> tx status X" => sub {
             $tx_id = UUID::Random::generate();
-            for my $i (1..$num_undo_actions) {
+
+            my $i = 0;
+            my $last;
+            while (1) {
+                $i++;
+                last if $last;
 
                 # first create a committed transaction
                 $reset_state->();
@@ -321,7 +331,7 @@ sub test_tx_action {
                     or note "res = ", explain($res);
 
                 subtest "crash at rollback action #$i" => sub {
-                    my $ju = 0; my $jrb = 0;
+                    my $ju = 0; my $jrb = 0; my $crashed;
                     local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
                         my ($self, %args) = @_;
                         if ($args{which} eq 'undo') {
@@ -334,7 +344,7 @@ sub test_tx_action {
                         } elsif ($args{which} eq 'rollback') {
                             if (++$jrb == $i) {
                                 for ("CRASH DURING ROLLBACK") {
-                                    $log->trace($_);die $_;
+                                    $crashed++; $log->trace($_);die $_;
                                 }
                             }
                         }
@@ -342,6 +352,7 @@ sub test_tx_action {
                     eval {
                         $res = $pa->request(undo=>"/", {tx_id=>$tx_id});
                     };
+                    do { ok 1; $last++; return } unless $crashed;
 
                     # doesn't die, trapped by eval{} in _action_loop. there's
                     # also eval{} placed by periwrap
@@ -363,7 +374,12 @@ sub test_tx_action {
 
         subtest "crash while redo -> roll forward" => sub {
             $tx_id = UUID::Random::generate();
-            for my $i (1..$num_actions) {
+
+            my $i = 0;
+            my $last;
+            while (1) {
+                $i++;
+                last if $last;
 
                 $reset_state->();
                 # first create an undone transaction
@@ -378,7 +394,7 @@ sub test_tx_action {
                     or note "res = ", explain($res);
 
                 subtest "crash at redo action #$i" => sub {
-                    my $jrd = 0;
+                    my $jrd = 0; my $crashed;
                     local $Perinci::Tx::Manager::_settings{default_rollback_on_action_failure} = 0;
                     local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
                         my ($self, %args) = @_;
@@ -386,13 +402,14 @@ sub test_tx_action {
                         return unless $args{which} eq 'redo';
                         if (++$jrd == $i) {
                             for ("CRASH DURING REDO ACTION") {
-                                $log->trace($_);die $_;
+                                $crashed++; $log->trace($_); die $_;
                             }
                         }
                     };
                     eval {
                         $res = $pa->request(redo=>"/", {tx_id=>$tx_id});
                     };
+                    do { ok 1; $last++; return } unless $crashed;
 
                     # doesn't die, trapped by eval{} in _action_loop. there's
                     # also eval{} placed by periwrap
@@ -414,7 +431,12 @@ sub test_tx_action {
 
         subtest "crash while roll forward failed redo -> tx status X" => sub {
             $tx_id = UUID::Random::generate();
-            for my $i (1..$num_actions) {
+
+            my $i = 0;
+            my $last;
+            while (1) {
+                $i++;
+                last if $last;
 
                 # first create an undone transaction
                 $reset_state->();
@@ -429,7 +451,7 @@ sub test_tx_action {
                     or note "res = ", explain($res);
 
                 subtest "crash at rollback action #$i" => sub {
-                    my $jrd = 0; my $jrb = 0;
+                    my $jrd = 0; my $jrb = 0; my $crashed;
                     local $Perinci::Tx::Manager::_hooks{after_fix_state} = sub {
                         my ($self, %args) = @_;
                         if ($args{which} eq 'redo') {
@@ -442,7 +464,7 @@ sub test_tx_action {
                         } elsif ($args{which} eq 'rollback') {
                             if (++$jrb == $i) {
                                 for ("CRASH DURING ROLLBACK") {
-                                    $log->trace($_);die $_;
+                                    $crashed++; $log->trace($_); die $_;
                                 }
                             }
                         }
@@ -450,6 +472,7 @@ sub test_tx_action {
                     eval {
                         $res = $pa->request(redo=>"/", {tx_id=>$tx_id});
                     };
+                    do { ok 1; $last++; return } unless $crashed;
 
                     # doesn't die, trapped by eval{} in _action_loop. there's
                     # also eval{} placed by periwrap
