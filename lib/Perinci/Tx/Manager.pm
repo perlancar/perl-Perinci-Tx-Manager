@@ -224,13 +224,13 @@ CREATE TABLE IF NOT EXISTS tx (
 _
                 $dbh->do(<<'_');
 INSERT INTO tx (ser_id,str_id,owner_id,summary,status,ctime,commit_time,last_action_id)
-SELECT ser_id,str_id,owner_id,summary,status,ctime,commit_time,last_action_id FROM tmp_tx
+SELECT ser_id,str_id,owner_id,summary,status,ctime,commit_time,last_call_id FROM tmp_tx
 _
 
                 $dbh->do("DROP TABLE tmp_tx");
                 $dbh->do("DROP TABLE call");
                 $dbh->do("DROP TABLE undo_call");
-                $dbh->do("UPDATE TABLE _meta SET value='5' WHERE name='v'");
+                $dbh->do("UPDATE _meta SET value='5' WHERE name='v'");
                 # delete column sp, not yet
                 $dbh->commit;
             };
