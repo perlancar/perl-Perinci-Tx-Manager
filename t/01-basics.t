@@ -158,6 +158,23 @@ subtest 'invoking unqualified function = rolls back' => sub {
 };
 # txs: s1(C), f2(R)[cleaned]
 
+subtest 'argument not serializable to JSON = rolls back' => sub {
+    test_request(
+        req => [begin_tx=>"/", {tx_id=>"f3"}],
+        status => 200,
+    );
+    test_request(
+        req => [call=>"/TestTx/setval",
+                {tx_id=>"f3", args=>{name=>"a", value=>qr//}}],
+        status => 532,
+        posttest => sub {
+            my $tres = $tm->list(detail=>1, tx_id=>"f3");
+            is($tres->[2][0]{tx_status}, "R", "Transaction status is R");
+        },
+    );
+};
+# txs: s1(C), f3(R)[cleaned]
+
 subtest 'rollback' => sub {
     test_request(
         req => [begin_tx=>"/", {tx_id=>"r1"}],
