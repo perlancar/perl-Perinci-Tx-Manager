@@ -175,6 +175,26 @@ subtest 'argument not serializable to JSON = rolls back' => sub {
 };
 # txs: s1(C), f3(R)[cleaned]
 
+# currently, due to the way Perinci::Access::InProcess works, request to unknown
+# module never reaches action_call(), so we can't rollback
+#
+#subtest 'request to unknown function = rolls back' => sub {
+#    test_request(
+#        req => [begin_tx=>"/", {tx_id=>"f4"}],
+#        status => 200,
+#    );
+#    test_request(
+#        req => [call=>"/Foo/bar",
+#                {tx_id=>"f4", args=>{}}],
+#        status => 500,
+#        posttest => sub {
+#            my $tres = $tm->list(detail=>1, tx_id=>"f4");
+#            is($tres->[2][0]{tx_status}, "R", "Transaction status is R");
+#        },
+#    );
+#};
+## txs: s1(C), f4(R)[cleaned]
+
 subtest 'rollback' => sub {
     test_request(
         req => [begin_tx=>"/", {tx_id=>"r1"}],
