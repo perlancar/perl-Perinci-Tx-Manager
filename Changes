@@ -1,5 +1,11 @@
 Revision history for Perinci-Tx-Manager
 
+0.40     2012-09-04 (SHARYANTO)
+
+         - Tweak log level for check_state status 200 message (debug instead of
+           info).
+
+
 0.39     2012-09-04 (SHARYANTO)
 
          - Allow function to skip logging check_state status 200 message by
