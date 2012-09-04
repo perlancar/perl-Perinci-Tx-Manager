@@ -1,23 +1,31 @@
 Revision history for Perinci-Tx-Manager
 
+0.39     2012-09-04 (SHARYANTO)
+
+         - Allow function to skip logging check_state status 200 message by
+           using empty string.
+
+
 0.38     2012-09-04 (SHARYANTO)
 
-         Log check_state status 200 message @info (Rinci 1.1.29).
+         - Log check_state status 200 message @info (Rinci 1.1.29).
 
 
 0.37     2012-08-29 (SHARYANTO)
 
-         No functional changes. Fix a couple SQL syntax error (steven--).
+         No functional changes.
+
+         - Fix a couple SQL syntax error (steven--).
 
 
 0.36     2012-08-29 (SHARYANTO)
 
-         Update to Rinci 1.1.28 (pass '-tx_action_id' to function).
+         - Update to Rinci 1.1.28 (pass '-tx_action_id' to function).
 
 
 0.35     2012-08-29 (SHARYANTO)
 
-         Some fixes and tweaks for Test::Perinci::Tx::Manager.
+         - Some fixes and tweaks for Test::Perinci::Tx::Manager.
 
 
 0.34     2012-08-28 (SHARYANTO)
