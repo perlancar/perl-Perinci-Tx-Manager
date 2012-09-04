@@ -1,5 +1,10 @@
 Revision history for Perinci-Tx-Manager
 
+0.38     2012-09-04 (SHARYANTO)
+
+         Log check_state status 200 message @info (Rinci 1.1.29).
+
+
 0.37     2012-08-29 (SHARYANTO)
 
          No functional changes. Fix a couple SQL syntax error (steven--).
