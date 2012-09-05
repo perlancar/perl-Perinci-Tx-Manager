@@ -1,5 +1,13 @@
 Revision history for Perinci-Tx-Manager
 
+0.41     2012-09-05 (SHARYANTO)
+
+         No functional changes for the main module.
+
+         - Test::Perinci::Tx::Manager: Execute 'after_do' and 'after_undo' hooks
+           even if 'status' != 200.
+
+
 0.40     2012-09-04 (SHARYANTO)
 
          - Tweak log level for check_state status 200 message (debug instead of
