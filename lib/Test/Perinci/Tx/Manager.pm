@@ -101,7 +101,7 @@ sub test_tx_action {
             }
             $tx_id1 = $tx_id;
         };
-        $targs{after_do}->() if $targs{after_do};
+        subtest "after_do" => sub { $targs{after_do}->() } if $targs{after_do};
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
@@ -124,7 +124,8 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
-        $targs{before_undo}->() if $targs{before_undo};
+        subtest "before_undo" => sub { $targs{before_undo}->() }
+            if $targs{before_undo};
         subtest "==test_tx_action 03/11: undo==" => sub {
             $res = $pa->request(undo => "/", {
                 tx_id=>$tx_id1, confirm=>$targs{confirm}});
@@ -138,7 +139,8 @@ sub test_tx_action {
             is($res->[2][0]{tx_status}, 'U', "transaction status is U")
                 or note "res = ", explain($res);
         };
-        $targs{after_undo}->() if $targs{after_undo};
+        subtest "after_undo" => sub { $targs{after_undo}->() }
+            if $targs{after_undo};
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
@@ -247,7 +249,8 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
-        $targs{before_undo}->() if $targs{before_undo};
+        subtest "before_undo" => sub { $targs{before_undo}->() }
+            if $targs{before_undo};
         subtest "==test_tx_action 07/11: undo #2==" => sub {
             $res = $pa->request(undo => "/", {
                 tx_id=>$tx_id1, confirm=>$targs{confirm}});
@@ -260,7 +263,8 @@ sub test_tx_action {
                 or note "res = ", explain($res);
         };
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
-        $targs{after_undo}->() if $targs{after_undo};
+        subtest "after_undo" => sub { $targs{after_undo}->() }
+            if $targs{after_undo};
 
 
         subtest "==test_tx_action 08/11: crash while undo -> roll forward==" => sub {
