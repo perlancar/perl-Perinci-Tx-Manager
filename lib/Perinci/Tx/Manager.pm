@@ -693,7 +693,7 @@ sub _action_loop {
     my $eval_res = eval {
         $actions = $self->_get_actions_from_db($which) unless $actions;
         $log->tracef("$lp Actions to perform: %s",
-                     [map {[$_->[0], $_->[2]]} @$actions]);
+                     [map {[$_->[0], $_->[2] // $_->[1]]} @$actions]);
 
         # check the actions
         $res = $self->_check_actions($actions);
