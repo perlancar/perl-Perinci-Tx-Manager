@@ -444,26 +444,6 @@ sub _set_tx_status_after_actions {
     $self->_set_tx_status_before_or_after_actions('after', @_);
 }
 
-# on which table to get/record action?
-sub _select_action_table {
-    my ($self, $which) = @_;
-    my $tx = $self->{_cur_tx};
-
-    $which eq 'redo' || $which eq 'rollback' && $tx->{status} eq 'v' ?
-        'do_action' : 'undo_action';
-}
-
-# on which table to record undo action?
-sub _select_undo_action_table {
-    my ($self, $which) = @_;
-    my $tx = $self->{_cur_tx};
-
-    $which eq 'redo' || $which eq 'rollback' && $tx->{status} eq 'v' ||
-        # we can also invoke actions during undo
-        ($which eq 'action' && $self->{_in_undo})
-            ? 'do_action' : 'undo_action';
-}
-
 # return actions (arrayref)
 sub _get_actions_from_db {
     my ($self, $which) = @_;
@@ -474,7 +454,8 @@ sub _get_actions_from_db {
     my $dbh = $self->{_dbh};
     my $tx  = $self->{_cur_tx};
 
-    my $t = $self->_select_action_table($which);
+    my $t = $which eq 'redo' || $which eq 'rollback' && $tx->{status} eq 'v' ?
+        'do_action' : 'undo_action';
 
     my $lai = $tx->{last_action_id};
     my $actions = $dbh->selectall_arrayref(
@@ -494,8 +475,10 @@ sub _get_undo_actions_from_db {
 
     my $dbh = $self->{_dbh};
     my $tx  = $self->{_cur_tx};
-
-    my $t = $self->_select_undo_action_table($which);
+    my $t = $which eq 'redo' || $which eq 'rollback' && $tx->{status} eq 'v' ||
+        # we can also invoke actions during undo
+        ($which eq 'action' && !$self->{_in_undo})
+            ? 'undo_action' : 'do_action';
 
     my $actions = $dbh->selectall_arrayref(
         "SELECT f, NULL, args, id FROM $t WHERE tx_ser_id=? ".
@@ -566,11 +549,12 @@ sub _perform_action {
 
     # record action
 
-    if ($which eq 'action') {
-        $dbh->do("INSERT INTO do_action (tx_ser_id,ctime,f,args) ".
+    if ($which eq 'action' && !$self->{_in_undo} && !$self->{_in_redo}) {
+        my $t = 'do_action';
+        $dbh->do("INSERT INTO $t (tx_ser_id,ctime,f,args) ".
                      "VALUES (?,?,?,?)", {},
-             $tx->{ser_id}, time(), $action->[0], $action->[2])
-            or return "$ep: db: can't insert do_action: ".$dbh->errstr;
+                 $tx->{ser_id}, time(), $action->[0], $action->[2])
+            or return "$ep: db: can't insert $t: ".$dbh->errstr;
         my $action_id = $dbh->last_insert_id("","","","");
         $dbh->do("UPDATE tx SET last_action_id=? WHERE ser_id=?", {},
                  $action_id, $tx->{ser_id})
@@ -682,6 +666,7 @@ sub _action_loop {
     local $self->{_in_rollback} = 1 if $which eq 'rollback';
 
     local $self->{_in_undo} = 1 if $which eq 'undo';
+    local $self->{_in_redo} = 1 if $which eq 'redo';
 
     my $tx = $self->{_cur_tx};
     return "called w/o Rinci transaction, probably a bug" unless $tx;
