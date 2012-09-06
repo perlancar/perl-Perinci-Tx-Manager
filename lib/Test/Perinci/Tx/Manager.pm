@@ -77,7 +77,7 @@ sub test_tx_action {
         }
 
 
-        subtest "normal action + commit" => sub {
+        subtest "==test_tx_action 01/11: normal action + commit==" => sub {
             $tx_id = UUID::Random::generate();
             $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
             unless (is($res->[0], 200, "begin_tx succeeds")) {
@@ -105,7 +105,7 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
-        subtest "repeat action -> noop (idempotent), rollback" => sub {
+        subtest "==test_tx_action 02/11: repeat action -> noop (idempotent), rollback==" => sub {
             $tx_id = UUID::Random::generate();
             $res = $pa->request(begin_tx => "/", {tx_id=>$tx_id});
             $res = $pa->request(call => $uri, {
@@ -125,7 +125,7 @@ sub test_tx_action {
 
 
         $targs{before_undo}->() if $targs{before_undo};
-        subtest "undo" => sub {
+        subtest "==test_tx_action 03/11: undo==" => sub {
             $res = $pa->request(undo => "/", {
                 tx_id=>$tx_id1, confirm=>$targs{confirm}});
             $estatus = $targs{undo_status} // 200;
@@ -142,7 +142,7 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
-        subtest "crash during action -> rollback" => sub {
+        subtest "==test_tx_action 04/11: crash during action -> rollback==" => sub {
             $tx_id = UUID::Random::generate();
 
             for my $i (1..$num_actions) {
@@ -182,7 +182,7 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
-        subtest "crash during rollback -> tx status X" => sub {
+        subtest "==test_tx_action 05/11: crash during rollback -> tx status X==" => sub {
             $tx_id = UUID::Random::generate();
 
             my $i = 0;
@@ -233,7 +233,7 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
-        subtest "redo" => sub {
+        subtest "==test_tx_action 06/11: redo==" => sub {
             $res = $pa->request(redo => "/", {
                 tx_id=>$tx_id1, confirm=>$targs{confirm}});
             unless (is($res->[0], 200, "redo succeeds")) {
@@ -248,7 +248,7 @@ sub test_tx_action {
 
 
         $targs{before_undo}->() if $targs{before_undo};
-        subtest "undo #2" => sub {
+        subtest "==test_tx_action 07/11: undo #2==" => sub {
             $res = $pa->request(undo => "/", {
                 tx_id=>$tx_id1, confirm=>$targs{confirm}});
             unless (is($res->[0], 200, "undo succeeds")) {
@@ -263,7 +263,7 @@ sub test_tx_action {
         $targs{after_undo}->() if $targs{after_undo};
 
 
-        subtest "crash while undo -> roll forward" => sub {
+        subtest "==test_tx_action 08/11: crash while undo -> roll forward==" => sub {
             $tx_id = UUID::Random::generate();
             for my $i (1..$num_undo_actions) {
 
@@ -312,7 +312,7 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
-        subtest "crash while roll forward failed undo -> tx status X" => sub {
+        subtest "==test_tx_action 09/11: crash while roll forward failed undo -> tx status X==" => sub {
             $tx_id = UUID::Random::generate();
 
             my $i = 0;
@@ -374,7 +374,7 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
-        subtest "crash while redo -> roll forward" => sub {
+        subtest "==test_tx_action 10/11: crash while redo -> roll forward==" => sub {
             $tx_id = UUID::Random::generate();
 
             my $i = 0;
@@ -431,7 +431,7 @@ sub test_tx_action {
         goto DONE_TESTING if $done_testing || !Test::More->builder->is_passing;
 
 
-        subtest "crash while roll forward failed redo -> tx status X" => sub {
+        subtest "==test_tx_action 11/11: crash while roll forward failed redo -> tx status X==" => sub {
             $tx_id = UUID::Random::generate();
 
             my $i = 0;
