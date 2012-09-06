@@ -444,17 +444,37 @@ sub _set_tx_status_after_actions {
     $self->_set_tx_status_before_or_after_actions('after', @_);
 }
 
+# on which table to get/record action?
+sub _select_action_table {
+    my ($self, $which) = @_;
+    my $tx = $self->{_cur_tx};
+
+    $which eq 'redo' || $which eq 'rollback' && $tx->{status} eq 'v' ?
+        'do_action' : 'undo_action';
+}
+
+# on which table to record undo action?
+sub _select_undo_action_table {
+    my ($self, $which) = @_;
+    my $tx = $self->{_cur_tx};
+
+    $which eq 'redo' || $which eq 'rollback' && $tx->{status} eq 'v' ||
+        # we can also invoke actions during undo
+        ($which eq 'action' && $self->{_in_undo})
+            ? 'do_action' : 'undo_action';
+}
+
 # return actions (arrayref)
 sub _get_actions_from_db {
     my ($self, $which) = @_;
 
+    # for safety, we shouldn't call this function when which='action' anyway
     return if $which eq 'action';
 
     my $dbh = $self->{_dbh};
     my $tx  = $self->{_cur_tx};
 
-    my $t = $which eq 'redo' || $which eq 'rollback' && $tx->{status} eq 'v' ?
-        'do_action' : 'undo_action';
+    my $t = $self->_select_action_table($which);
 
     my $lai = $tx->{last_action_id};
     my $actions = $dbh->selectall_arrayref(
@@ -475,8 +495,7 @@ sub _get_undo_actions_from_db {
     my $dbh = $self->{_dbh};
     my $tx  = $self->{_cur_tx};
 
-    my $t = $which eq 'redo' || $which eq 'rollback' && $tx->{status} eq 'v' ?
-        'undo_action' : 'do_action';
+    my $t = $self->_select_undo_action_table($which);
 
     my $actions = $dbh->selectall_arrayref(
         "SELECT f, NULL, args, id FROM $t WHERE tx_ser_id=? ".
@@ -569,7 +588,7 @@ sub _perform_action {
         my $j = 0;
         for my $ua (@$undo_actions) {
             local $ep = "$ep undo_actions[$j] ($ua->[0])";
-            if ($which eq 'undo') {
+            if ($self->{_in_undo}) {
                 $dbh->do(
                     "INSERT INTO do_action (tx_ser_id,ctime,f,args) ".
                         "VALUES (?,?,?,?)", {},
@@ -661,6 +680,8 @@ sub _action_loop {
     # rollback, and functions might call $tx->rollback too upon failure.
     return if $self->{_in_rollback} && $which eq 'rollback';
     local $self->{_in_rollback} = 1 if $which eq 'rollback';
+
+    local $self->{_in_undo} = 1 if $which eq 'undo';
 
     my $tx = $self->{_cur_tx};
     return "called w/o Rinci transaction, probably a bug" unless $tx;
