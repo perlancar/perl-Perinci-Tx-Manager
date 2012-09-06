@@ -1,5 +1,16 @@
 Revision history for Perinci-Tx-Manager
 
+0.42     2012-09-05 (SHARYANTO)
+
+         [BUG FIXES]
+
+         - Fix handling of nested action during undo/redo.
+
+         [OTHERS]
+
+         - Tweak log messages to aid debugging.
+
+
 0.41     2012-09-05 (SHARYANTO)
 
          No functional changes for the main module.
