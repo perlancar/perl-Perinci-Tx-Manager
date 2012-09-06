@@ -462,10 +462,26 @@ sub _get_actions_from_db {
             ($lai ? "AND (id<>$lai AND ".
                  "ctime <= (SELECT ctime FROM $t WHERE id=$lai)) " : "").
                      "ORDER BY ctime, id", {}, $tx->{ser_id});
-    $actions = [reverse @$actions];
-    $log->tracef("$lp Actions to perform: %s",
-                 [map {[$_->[0], $_->[2]]} @$actions]);
-    $actions;
+    [reverse @$actions];
+}
+
+# return undo actions (arrayref), this is currently used for debugging only
+sub _get_undo_actions_from_db {
+    my ($self, $which) = @_;
+
+    # rollback does not record undo actions in db
+    return if $which eq 'rollback';
+
+    my $dbh = $self->{_dbh};
+    my $tx  = $self->{_cur_tx};
+
+    my $t = $which eq 'redo' || $which eq 'rollback' && $tx->{status} eq 'v' ?
+        'undo_action' : 'do_action';
+
+    my $actions = $dbh->selectall_arrayref(
+        "SELECT f, NULL, args, id FROM $t WHERE tx_ser_id=? ".
+            "ORDER BY ctime, id", {}, $tx->{ser_id});
+    [reverse @$actions];
 }
 
 sub _collect_stash {
@@ -670,6 +686,8 @@ sub _action_loop {
     # give up).
     my $eval_res = eval {
         $actions = $self->_get_actions_from_db($which) unless $actions;
+        $log->tracef("$lp Actions to perform: %s",
+                     [map {[$_->[0], $_->[2]]} @$actions]);
 
         # check the actions
         $res = $self->_check_actions($actions);
@@ -712,6 +730,14 @@ sub _action_loop {
             }
         }
     }
+
+    if ($log->is_trace) {
+        my $undo_actions = $self->_get_undo_actions_from_db($which);
+        $log->tracef("$lp Recorded undo actions: %s",
+                     [map {[$_->[0], $_->[2]]} @$undo_actions])
+            if $undo_actions;
+    }
+
     return;
 }
 
