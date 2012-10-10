@@ -1,5 +1,12 @@
 Revision history for Perinci-Tx-Manager
 
+0.43     2012-10-10 (SHARYANTO)
+
+         [BUG FIXES]
+
+         - Can now load functions from main:: or already-loaded package.
+
+
 0.42     2012-09-05 (SHARYANTO)
 
          [BUG FIXES]
