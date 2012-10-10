@@ -11,6 +11,7 @@ use JSON;
 use Log::Any '$log';
 #use Perinci::Sub::Util qw(wrapres);
 use Scalar::Util qw(blessed);
+use SHARYANTO::Package::Util qw(package_exists);
 use Time::HiRes qw(time);
 use UUID::Random;
 
@@ -279,8 +280,24 @@ sub _get_func_and_meta {
     my ($module, $leaf) = $func =~ /(.+)::(.+)/
         or return [400, "Not a valid fully qualified function name: $func"];
     my $module_p = $module; $module_p =~ s!::!/!g; $module_p .= ".pm";
-    eval { require $module_p }
-        or return [500, "Can't load module $module: $@"];
+    eval { require $module_p };
+    my $req_err = $@;
+    if ($req_err) {
+        if (!package_exists($module)) {
+            return [500, "Can't load module $module (probably ".
+                        "mistyped or missing module): $req_err"];
+        } elsif ($req_err !~ m!Can't locate!) {
+            return [500, "Can't load module $module (probably ".
+                        "compile error): $req_err"];
+        }
+        # require error of "Can't locate ..." can be ignored. it
+        # might mean package is already defined by other code. we'll
+        # try and access it anyway.
+    } elsif (!package_exists($module)) {
+        # shouldn't happen
+        return [500, "Module loaded OK, but no $module package ".
+                    "found, something's wrong"];
+    }
     # get metadata as well as wrapped
     my $res = $self->{pa}->_get_code_and_meta({
         -module=>$module, -leaf=>$leaf, -type=>'function'});
