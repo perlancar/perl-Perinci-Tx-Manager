@@ -3,11 +3,13 @@ package Perinci::Tx::Manager;
 use 5.010;
 use strict;
 use warnings;
+
 use DBI;
 use File::Flock;
 use File::Remove qw(remove);
 use JSON;
 use Log::Any '$log';
+#use Perinci::Sub::Util qw(wrapres);
 use Scalar::Util qw(blessed);
 use Time::HiRes qw(time);
 use UUID::Random;
@@ -354,7 +356,8 @@ sub _check_actions {
         };
         return "$ep: can't decode/encode JSON arguments: $@" if $@;
         my $res = $self->_get_func_and_meta($a->[0]);
-        return "$ep: can't get metadata" unless $res->[0] == 200;
+        return "$ep: can't get metadata: $res->[0] - $res->[1]"
+            unless $res->[0] == 200;
         my ($func, $meta) = @{$res->[2]};
         $res = $self->_test_tx_support($meta);
         return "$ep: $res" if $res;
