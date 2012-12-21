@@ -147,7 +147,7 @@ subtest 'invoking unqualified function = rolls back' => sub {
         status => 200,
     );
     test_request(
-        req => [call=>"/Perinci/Examples/delay",
+        req => [call=>"/TestTx/delay",
                 {tx_id=>"f2", args=>{n=>0}}],
         status => 532, #412,
         posttest => sub {

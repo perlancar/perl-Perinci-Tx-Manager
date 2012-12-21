@@ -16,10 +16,6 @@ $SPEC{unsetval} = {
             schema => 'str*',
             req => 1,
         },
-        value => {
-            schema => 'any',
-            req => 1,
-        },
     },
     features => {
         tx => {v=>2},
@@ -168,5 +164,50 @@ sub emptyvals {
     }
     [400, "Invalid -tx_action"];
 }
+
+# BEGIN COPIED FROM Perinci::Examples 0.13
+# as well as testing default_lang and *.alt.lang.XX properties
+$SPEC{delay} = {
+    v => 1.1,
+    default_lang => 'id_ID',
+    "summary.alt.lang.en_US" => "Sleep, by default for 10 seconds",
+    "description.alt.lang.en_US" => <<'_',
+
+Can be used to test the *time_limit* property.
+
+_
+    summary => "Tidur, defaultnya 10 detik",
+    description => <<'_',
+
+Dapat dipakai untuk menguji properti *time_limit*.
+
+_
+    args => {
+        n => {
+            default_lang => 'en_US',
+            summary => 'Number of seconds to sleep',
+            "summary.alt.lang.id_ID" => 'Jumlah detik',
+            schema => ['int', {default=>10, min=>0, max=>7200}],
+            pos => 0,
+        },
+        per_second => {
+            "summary.alt.lang.en_US" => 'Whether to sleep(1) for n times instead of sleep(n)',
+            summary => 'Jika diset ya, lakukan sleep(1) n kali, bukan sleep(n)',
+            schema => ['bool', {default=>0}],
+        },
+    },
+};
+sub delay {
+    my %args = @_; # NO_VALIDATE_ARGS
+    my $n = $args{n} // 10;
+
+    if ($args{per_second}) {
+        sleep 1 for 1..$n;
+    } else {
+        sleep $n;
+    }
+    [200, "OK", "Slept for $n sec(s)"];
+}
+# END COPIED FROM Perinci::Examples 0.13
 
 1;
