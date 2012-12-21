@@ -1,5 +1,14 @@
 Revision history for Perinci-Tx-Manager
 
+0.44     2012-12-21 (SHARYANTO)
+
+         No functional changes. Remove circular dependency because we depended
+         on Perinci::Examples and it in turn depends on Perinci::CmdLine (which
+         depends on us) [RT#81996]. Also fix test (fix function metadata for
+         unsetval(), bug uncovered now that we have functioning argument
+         validation).
+
+
 0.43     2012-10-10 (SHARYANTO)
 
          [BUG FIXES]

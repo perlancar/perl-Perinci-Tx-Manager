@@ -1356,6 +1356,8 @@ sub discard_all {
 1;
 # ABSTRACT: A Rinci transaction manager
 
+=for Pod::Coverage ^(call)$
+
 =head1 SYNOPSIS
 
  # used by Perinci::Access::InProcess
