@@ -514,9 +514,9 @@ sub test_tx_action {
 
 Test performing action using transaction.
 
-Will initialize transaction manager ($tm) and test action using $tm->call().
-Will test several times with different scenarios to make sure commit, rollback,
-undo, redo, and crash recoveries work.
+Will initialize transaction manager ($tm) and test action. Will test several
+times with different scenarios to make sure commit, rollback, undo, redo, and
+crash recoveries work.
 
 Arguments (C<*> denotes required arguments):
 
@@ -546,7 +546,7 @@ state to become inconsistent.
 
 =item * status => INT (default: 200)
 
-Expect $tm->call() to return this status.
+Expect $tm->action() to return this status.
 
 =item * reset_db_dir => BOOL (default: 0)
 
