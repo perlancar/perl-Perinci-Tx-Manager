@@ -1,12 +1,18 @@
 Revision history for Perinci-Tx-Manager
 
+0.45     2013-09-08 (SHARYANTO)
+
+         - No functional changes. Update to Perinci::Access::Schemeless (which
+           replaces Perinci::Access::InProcess).
+
+
 0.44     2012-12-21 (SHARYANTO)
 
-         No functional changes. Remove circular dependency because we depended
-         on Perinci::Examples and it in turn depends on Perinci::CmdLine (which
-         depends on us) [RT#81996]. Also fix test (fix function metadata for
-         unsetval(), bug uncovered now that we have functioning argument
-         validation).
+         - No functional changes. Remove circular dependency because we depended
+           on Perinci::Examples and it in turn depends on Perinci::CmdLine
+           (which depends on us) [RT#81996]. Also fix test (fix function
+           metadata for unsetval(), bug uncovered now that we have functioning
+           argument validation).
 
 
 0.43     2012-10-10 (SHARYANTO)
@@ -28,8 +34,6 @@ Revision history for Perinci-Tx-Manager
 
 
 0.41     2012-09-05 (SHARYANTO)
-
-         No functional changes for the main module.
 
          - Test::Perinci::Tx::Manager: Execute 'after_do' and 'after_undo' hooks
            even if 'status' != 200.
@@ -54,8 +58,6 @@ Revision history for Perinci-Tx-Manager
 
 0.37     2012-08-29 (SHARYANTO)
 
-         No functional changes.
-
          - Fix a couple SQL syntax error (steven--).
 
 
@@ -79,21 +81,21 @@ Revision history for Perinci-Tx-Manager
 
 0.33     2012-08-28 (SHARYANTO)
 
-         Pass special arguments to functions: '-tx_recovery' => 1 when during
-         recovery, and '-tx_rollback' => 1 when during rollback, for informative
-         purposes.
+         - Pass special arguments to functions: '-tx_recovery' => 1 when during
+           recovery, and '-tx_rollback' => 1 when during rollback, for
+           informative purposes.
 
 
 0.32     2012-08-28 (SHARYANTO)
 
-         Implement confirmation (Rinci 1.1.27). Pass 'confirm' => 1 to action()
-         to pass '-confirm' special argument to function.
+         - Implement confirmation (Rinci 1.1.27). Pass 'confirm' => 1 to action()
+           to pass '-confirm' special argument to function.
 
 
 0.31     2012-08-25 (SHARYANTO)
 
-         No functional changes. Fix bug in recovery of crashed redo. Add more
-         tests.
+         - No functional changes. Fix bug in recovery of crashed redo. Add more
+           tests.
 
 
 0.30     2012-08-24 (SHARYANTO)
@@ -127,5 +129,5 @@ Revision history for Perinci-Tx-Manager
 
 0.28     2012-08-10 (SHARYANTO)
 
-         First release, split to make Perinci dist empty (that dist was a
-         growing mixed bag and caused headache in dependencies).
+         - First release, split to make Perinci dist empty (that dist was a
+           growing mixed bag and caused headache in dependencies).
