@@ -16,6 +16,30 @@ use SHARYANTO::Package::Util qw(package_exists);
 use Time::HiRes qw(time);
 use UUID::Random;
 
+# patch, add special action to just retrieve code and meta
+package Perinci::Access::Schemeless;
+
+sub actionmeta_get_code_and_meta { +{
+    applies_to => ['function'],
+    summary    => "Get metadata",
+} }
+
+sub action_get_code_and_meta {
+    my ($self, $req) = @_;
+
+    my $res;
+
+    $res = $self->get_code($req);
+    return $res if $res;
+
+    $res = $self->get_meta($req);
+    return $res if $res;
+
+    [200, "OK", [$req->{-code}, $req->{-meta}]];
+}
+
+package Perinci::Tx::Manager;
+
 # VERSION
 
 my $proto_v = 2;
@@ -36,7 +60,7 @@ our %_settings = (
 # Rinci tx (Rtx).
 
 # note: no method should die(), they all should return error message/response
-# instead. this is because we are called by Perinci::Access::InProcess and in
+# instead. this is because we are called by Perinci::Access::Schemeless and in
 # turn it is called by Perinci::Access::HTTP::Server without extra eval(). an
 # exception to this is in _init(), when we don't want to deal with old data and
 # just die.
@@ -53,8 +77,8 @@ our %_settings = (
 sub new {
     my ($class, %opts) = @_;
     return "Please supply pa object" unless blessed $opts{pa};
-    return "pa object must be an instance of Perinci::Access::InProcess"
-        unless $opts{pa}->isa("Perinci::Access::InProcess");
+    return "pa object must be an instance of Perinci::Access::Schemeless"
+        unless $opts{pa}->isa("Perinci::Access::Schemeless");
 
     my $obj = bless \%opts, $class;
     if ($opts{data_dir}) {
@@ -300,8 +324,7 @@ sub _get_func_and_meta {
                     "found, something's wrong"];
     }
     # get metadata as well as wrapped
-    my $res = $self->{pa}->_get_code_and_meta({
-        -module=>$module, -leaf=>$leaf, -type=>'function'});
+    my $res = $self->{pa}->request(get_code_and_meta => "/$module/$leaf");
     $res;
 }
 
@@ -1361,14 +1384,14 @@ sub discard_all {
 
 =head1 SYNOPSIS
 
- # used by Perinci::Access::InProcess
+ # used by Perinci::Access::Schemeless
 
 
 =head1 DESCRIPTION
 
 This class implements transaction and undo manager (TM), as specified by
 L<Rinci::function::Transaction> and L<Riap::Transaction>. It is meant to be
-instantiated by L<Perinci::Access::InProcess>, but will also be passed to
+instantiated by L<Perinci::Access::Schemeless>, but will also be passed to
 transactional functions to save undo/redo data.
 
 It uses SQLite database to store transaction list and undo/redo data as well as
@@ -1394,10 +1417,10 @@ Create new object. Arguments:
 
 =item * pa => OBJ
 
-Perinci::Access::InProcess object. This is required by Perinci::Tx::Manager to
+Perinci::Access::Schemeless object. This is required by Perinci::Tx::Manager to
 load/get functions when it wants to perform undo/redo/recovery.
-Perinci::Access::InProcess conveniently require() the Perl modules and wraps the
-functions.
+Perinci::Access::Schemeless conveniently require() the Perl modules and wraps
+the functions.
 
 =item * data_dir => STR (default C<~/.perinci/.tx>)
 
@@ -1577,6 +1600,6 @@ Discard (forget) all committed transactions.
 
 L<Rinci::Transaction>
 
-L<Perinci::Access::InProcess>
+L<Perinci::Access::Schemeless>
 
 =cut

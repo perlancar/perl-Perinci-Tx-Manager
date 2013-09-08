@@ -6,7 +6,7 @@ use warnings;
 use Log::Any '$log';
 
 use File::Remove qw(remove);
-use Perinci::Access::InProcess 0.30;
+use Perinci::Access::Schemeless 0.30;
 use Perinci::Tx::Manager;
 use Scalar::Util qw(blessed);
 use Test::More 0.96;
@@ -35,7 +35,7 @@ sub test_tx_action {
 
     $reset_state->();
 
-    my $pa = Perinci::Access::InProcess->new(
+    my $pa = Perinci::Access::Schemeless->new(
         use_tx=>1,
         custom_tx_manager => sub {
             my $self = shift;

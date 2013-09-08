@@ -10,7 +10,7 @@ use Test::More 0.96;
 
 use File::chdir;
 use File::Temp qw(tempdir);
-use Perinci::Access::InProcess;
+use Perinci::Access::Schemeless;
 use Perinci::Tx::Manager;
 use Scalar::Util qw(blessed);
 
@@ -25,7 +25,7 @@ my $tmp_dir = tempdir(CLEANUP=>1);
 $CWD = $tmp_dir;
 my $tx_dir  = "$tmp_dir/.tx";
 diag "tx dir is $tx_dir";
-my $pa_cached = Perinci::Access::InProcess->new(
+my $pa_cached = Perinci::Access::Schemeless->new(
     use_tx=>1,
     custom_tx_manager => sub {
         my $self = shift;
@@ -175,8 +175,8 @@ subtest 'argument not serializable to JSON = rolls back' => sub {
 };
 # txs: s1(C), f3(R)[cleaned]
 
-# currently, due to the way Perinci::Access::InProcess works, request to unknown
-# module never reaches action_call(), so we can't rollback
+# currently, due to the way Perinci::Access::Schemeless works, request to
+# unknown module never reaches action_call(), so we can't rollback
 #
 #subtest 'request to unknown function = rolls back' => sub {
 #    test_request(
@@ -398,10 +398,10 @@ sub test_request {
     subtest $test_name => sub {
         my $pa;
         if ($args{object_opts}) {
-            $pa = Perinci::Access::InProcess->new(%{$args{object_opts}});
+            $pa = Perinci::Access::Schemeless->new(%{$args{object_opts}});
         } else {
             unless ($pa_cached) {
-                $pa_cached = Perinci::Access::InProcess->new;
+                $pa_cached = Perinci::Access::Schemeless->new;
             }
             $pa = $pa_cached;
         }
