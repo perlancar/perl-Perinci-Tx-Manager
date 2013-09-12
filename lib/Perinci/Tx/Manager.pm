@@ -21,7 +21,7 @@ package Perinci::Access::Schemeless;
 
 sub actionmeta_get_code_and_meta { +{
     applies_to => ['function'],
-    summary    => "Get metadata",
+    summary    => "Get code and metadata",
 } }
 
 sub action_get_code_and_meta {
