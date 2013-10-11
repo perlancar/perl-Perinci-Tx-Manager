@@ -10,7 +10,6 @@ use File::Flock;
 use File::Remove qw(remove);
 use JSON;
 use Log::Any '$log';
-#use Perinci::Sub::Util qw(wrapres);
 use Scalar::Util qw(blessed);
 use SHARYANTO::Package::Util qw(package_exists);
 use Time::HiRes qw(time);
