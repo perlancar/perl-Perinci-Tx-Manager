@@ -1,5 +1,12 @@
 Revision history for Perinci-Tx-Manager
 
+0.46     2014-03-30 (SHARYANTO)
+
+         - No functional changes.
+
+         - Some minor updates.
+
+
 0.45     2013-09-08 (SHARYANTO)
 
          - No functional changes. Update to Perinci::Access::Schemeless (which

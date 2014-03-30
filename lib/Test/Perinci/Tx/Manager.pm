@@ -6,7 +6,7 @@ use warnings;
 use Log::Any '$log';
 
 use File::Remove qw(remove);
-use Perinci::Access::Schemeless 0.32;
+use Perinci::Access::Schemeless;
 use Perinci::Tx::Manager;
 use Scalar::Util qw(blessed);
 use Test::More 0.98;
