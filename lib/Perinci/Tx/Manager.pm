@@ -10,6 +10,7 @@ use File::Flock;
 use File::Remove qw(remove);
 use JSON;
 use Log::Any '$log';
+use Perinci::Sub::Util qw(err);
 use Scalar::Util qw(blessed);
 use SHARYANTO::Package::Util qw(package_exists);
 use Time::HiRes qw(time);
@@ -59,21 +60,17 @@ our %_settings = (
 # in the code, we must always specify whether it is a sqlite tx (sqltx) or a
 # Rinci tx (Rtx).
 
-# note: no method should die(), they all should return error message/response
-# instead. this is because we are called by Perinci::Access::Schemeless and in
-# turn it is called by Perinci::Access::HTTP::Server without extra eval(). an
-# exception to this is in _init(), when we don't want to deal with old data and
-# just die.
+# note: no method should die(), we should return error response instead. this is
+# historical (we are called by Perinci::Access::Schemeless and in turn it is
+# called by Perinci::Access::HTTP::Server, they used to have no wrapper eval(),
+# but that turns out to be rather unsafe). an exception to this is in _init(),
+# when we don't want to deal with old data and just die.
 
 # note: we have not dealt with sqlite's rowid wraparound. since it's a 64-bit
 # integer, we're pretty safe. we also usually rely on ctime first for sorting.
 
-# note: in general, methods prefixed with _ either return nothing, or return
-# undef on success and error message string on error (except
-# _get_func_and_meta(), _resp_tx_status(), _wrap(), _wrap2(), and a few others).
-# public methods return enveloped result (except new()).
-
-# new() should return object on success, or an error string if failed
+# new() should return object on success, or an error string if failed (fatal
+# error). the other methods (internal or external) returns enveloped result.
 sub new {
     my ($class, %opts) = @_;
     return "Please supply pa object" unless blessed $opts{pa};
@@ -94,11 +91,10 @@ sub new {
         $opts{data_dir} = "$ENV{HOME}/.perinci/.tx";
     }
     my $res = $obj->_init;
-    return $res if $res;
+    return $res->[1] unless $res->[0] == 200;
     $obj;
 }
 
-# return undef on success, or an error string on failure
 sub _lock_db {
     my ($self, $shared) = @_;
 
@@ -112,19 +108,19 @@ sub _lock_db {
         sleep    $_;
         $secs += $_;
     }
-    return "Tx database is still locked by other process (probably recovery) ".
-        "after $secs seconds, giving up" unless $locked;
-    return;
+    return [532, "Tx database is still locked by other process ".
+                "(probably recovery) after $secs seconds, giving up"]
+        unless $locked;
+    [200];
 }
 
 sub _unlock_db {
     my ($self) = @_;
 
     unlock("$self->{_db_file}.lck");
-    return;
+    [200];
 }
 
-# return undef on success, or an error string on failure
 sub _init {
     my ($self) = @_;
     my $data_dir = $self->{data_dir};
@@ -132,28 +128,30 @@ sub _init {
 
     unless (-d "$self->{data_dir}/.trash") {
         mkdir "$self->{data_dir}/.trash"
-            or return "Can't create .trash dir: $!";
+            or return [532, "Can't create .trash dir: $!"];
     }
     unless (-d "$self->{data_dir}/.tmp") {
         mkdir "$self->{data_dir}/.tmp"
-            or return "Can't create .tmp dir: $!";
+            or return [532, "Can't create .tmp dir: $!"];
     }
 
     $self->{_db_file} = "$data_dir/tx.db";
 
     (-d $data_dir)
-        or return "Transaction data dir ($data_dir) doesn't exist or not a dir";
+        or return [532, "Transaction data dir ($data_dir) doesn't exist ".
+                       "or not a dir"];
     my $dbh = DBI->connect("dbi:SQLite:dbname=$self->{_db_file}", undef, undef,
                            {
                                RaiseError => 0,
                                #sqlite_use_immediate_transaction => 1
-                           });
+                           })
+        or return [532, "Can't connect to transaction DB: $DBI::errstr"];
 
     # init database
 
     local $ep = "Can't init tx db:"; # error prefix
 
-    $dbh->do(<<_) or return "$ep create tx: ". $dbh->errstr;
+    $dbh->do(<<_) or return [532, "$ep create tx: ". $dbh->errstr];
 CREATE TABLE IF NOT EXISTS tx (
     ser_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     str_id VARCHAR(200) NOT NULL,
@@ -177,7 +175,7 @@ _
     # from this action instead of having to start from the first action of
     # transaction.
 
-    $dbh->do(<<_) or return "$ep create do_action: ". $dbh->errstr;
+    $dbh->do(<<_) or return [532, "$ep create do_action: ". $dbh->errstr];
 CREATE TABLE IF NOT EXISTS do_action (
     tx_ser_id INTEGER NOT NULL, -- refers tx(ser_id)
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -189,7 +187,7 @@ CREATE TABLE IF NOT EXISTS do_action (
 )
 _
 
-    $dbh->do(<<_) or return "$ep create undo_action: ". $dbh->errstr;
+    $dbh->do(<<_) or return [532, "$ep create undo_action: ". $dbh->errstr];
 CREATE TABLE IF NOT EXISTS undo_action (
     tx_ser_id INTEGER NOT NULL, -- refers tx(ser_id)
     action_id INTEGER NOT NULL, -- refers do_action(id)
@@ -200,13 +198,13 @@ CREATE TABLE IF NOT EXISTS undo_action (
 )
 _
 
-    $dbh->do(<<_) or return "$ep create _meta: ".$dbh->errstr;
+    $dbh->do(<<_) or return [532, "$ep create _meta: ".$dbh->errstr];
 CREATE TABLE IF NOT EXISTS _meta (
     name TEXT PRIMARY KEY NOT NULL,
     value TEXT
 )
 _
-    $dbh->do(<<_) or return "$ep insert v: ".$dbh->errstr;
+    $dbh->do(<<_) or return [532, "$ep insert v: ".$dbh->errstr];
 -- v is incremented everytime schema changes
 INSERT OR IGNORE INTO _meta VALUES ('v', '5')
 _
@@ -282,7 +280,7 @@ sub get_trash_dir {
     return [412, "No current transaction, won't create trash dir"] unless $tx;
     my $d = "$self->{data_dir}/.trash/$tx->{ser_id}";
     unless (-d $d) {
-        mkdir $d or return [500, "Can't mkdir $d: $!"];
+        mkdir $d or return [532, "Can't mkdir $d: $!"];
     }
     [200, "OK", $d];
 }
@@ -293,13 +291,12 @@ sub get_tmp_dir {
     return [412, "No current transaction, won't create tmp dir"] unless $tx;
     my $d = "$self->{data_dir}/.tmp/$tx->{ser_id}";
     unless (-d $d) {
-        mkdir $d or return [500, "Can't mkdir $d: $!"];
+        mkdir $d or return [532, "Can't mkdir $d: $!"];
     }
     [200, "OK", $d];
 }
 
-# return an enveloped response
-sub _get_func_and_meta {
+sub get_func_and_meta {
     my ($self, $func) = @_;
 
     my ($module, $leaf) = $func =~ /(.+)::(.+)/
@@ -309,10 +306,10 @@ sub _get_func_and_meta {
     my $req_err = $@;
     if ($req_err) {
         if (!package_exists($module)) {
-            return [500, "Can't load module $module (probably ".
+            return [532, "Can't load module $module (probably ".
                         "mistyped or missing module): $req_err"];
         } elsif ($req_err !~ m!Can't locate!) {
-            return [500, "Can't load module $module (probably ".
+            return [532, "Can't load module $module (probably ".
                         "compile error): $req_err"];
         }
         # require error of "Can't locate ..." can be ignored. it
@@ -320,7 +317,7 @@ sub _get_func_and_meta {
         # try and access it anyway.
     } elsif (!package_exists($module)) {
         # shouldn't happen
-        return [500, "Module loaded OK, but no $module package ".
+        return [532, "Module loaded OK, but no $module package ".
                     "found, something's wrong"];
     }
     # get metadata as well as wrapped
@@ -337,56 +334,58 @@ sub _rollback_dbh {
     my $self = shift;
     $self->{_dbh}->rollback if $self->{_in_sqltx};
     $self->{_in_sqltx} = 0;
+    [200];
 }
 
 # just a wrapper to avoid error when committing with no active tx
 sub _commit_dbh {
     my $self = shift;
-    return 1 unless $self->{_in_sqltx};
+    return [200] unless $self->{_in_sqltx};
     my $res = $self->{_dbh}->commit;
     $self->{_in_sqltx} = 0;
-    $res;
+    $res ? [200] : [532, "db: Can't commit: ".$self->{_dbh}->errstr];
 }
 
 # just a wrapper to avoid error when beginning twice
 sub _begin_dbh {
     my $self = shift;
-    return 1 if $self->{_in_sqltx};
+    return [200] if $self->{_in_sqltx};
     my $res = $self->{_dbh}->begin_work;
     $self->{_in_sqltx} = 1;
-    $res;
+    $res ? [200] : [532, "db: Can't begin: ".$self->{_dbh}->errstr];
 }
 
-# return undef on success, or an error string on failure
 sub _test_tx_support {
     my ($self, $meta) = @_;
     my $ff = $meta->{features} // {};
-    $ff->{tx} or return "function does not support transaction";
+    $ff->{tx} or
+        return [412, "function does not support transaction"];
     ($ff->{tx}{v} // 1) == $proto_v
-        or return "function does not support correct transaction protocol ".
-            "version (v=$proto_v needed)";
-    $ff->{idempotent} or return "function does not declare idempotent feature";
-    return;
+        or return [412, "function does not support correct transaction ".
+            "protocol version (v=$proto_v needed)"];
+    $ff->{idempotent} or
+        return [412, "function does not declare idempotent feature"];
+    [200];
 }
 
 # check actions. actions should be [[f,args,JSON(args),cid?,\&code?,$meta?],
 # ...]. this function will check whether function name is valid, whether
 # arguments can be deserialized, etc. modify actions in-place (e.g. qualify
 # function names if $opts->{qualify} is set, decode/encode JSON for arguments,
-# cache function in [4], cache meta in [5]). return undef on success, or error
-# message on error.
+# cache function in [4], cache meta in [5]).
 sub _check_actions {
     my ($self, $actions, $opts) = @_;
     $opts //= {};
-    return "not an array" unless ref($actions) eq 'ARRAY';
+    return [532, "BUG: argument 'actions' not an array"]
+        unless ref($actions) eq 'ARRAY';
     my $i = 0;
     for my $a (@$actions) {
         $i++;
         local $ep = "action #$i ($a->[0]): invalid action";
-        return "$ep: not an array" unless ref($a) eq 'ARRAY';
+        return [532, "$ep: not an array"] unless ref($a) eq 'ARRAY';
         $a->[0] = "$opts->{qualify}::$a->[0]"
             if $opts->{qualify} && $a->[0] !~ /::/;
-        return "$ep: invalid function name"
+        return [532, "$ep: invalid function name"]
             unless $a->[0] =~ /\A\w+(::\w+)+\z/;
         eval {
             if ($a->[2]) {
@@ -395,20 +394,20 @@ sub _check_actions {
                 $a->[2] = $json->encode($a->[1]);
             }
         };
-        return "$ep: can't decode/encode JSON arguments: $@" if $@;
-        my $res = $self->_get_func_and_meta($a->[0]);
-        return "$ep: can't get metadata: $res->[0] - $res->[1]"
+        return [532, "$ep: can't decode/encode JSON arguments: $@"] if $@;
+        my $res = $self->get_func_and_meta($a->[0]);
+        return err(532, "$ep: can't get metadata", $res)
             unless $res->[0] == 200;
         my ($func, $meta) = @{$res->[2]};
         $res = $self->_test_tx_support($meta);
-        return "$ep: $res" if $res;
+        return err(532, "$ep: function does not pass tx support test", $res)
+            unless $res->[0] == 200;
         $a->[4] = $func;
         $a->[5] = $meta;
     }
-    return;
+    [200];
 }
 
-# return undef on success, or error message string
 sub _set_tx_status_before_or_after_actions {
     my ($self, $which0, $whicha) = @_;
 
@@ -439,14 +438,15 @@ sub _set_tx_status_before_or_after_actions {
                              "%s -> %s ...", $os, $ns);
             $dbh->do("UPDATE tx SET status='$ns', last_action_id=NULL ".
                          "WHERE ser_id=?", {}, $tx->{ser_id})
-                or return "db: Can't update tx status $os -> $ns: ".
-                    $dbh->errstr;
+                or return [532, "db: Can't update tx status $os -> $ns: ".
+                    $dbh->errstr];
             # to make sure, check once again if Rtx status is indeed updated
             my @r = $dbh->selectrow_array(
                 "SELECT status FROM tx WHERE ser_id=?", {}, $tx->{ser_id});
-            return "Can't update tx status #3 (tx doesn't exist in db)"
-                unless @r;
-            return "Can't update tx status #2 (wants $ns, still $r[0])"
+            return [532, "Can't update tx status #3 ".
+                        "(tx doesn't exist in db)"] unless @r;
+            return [532, "Can't update tx status #2 ".
+                        "(wants $ns, still $r[0])"]
                 unless $r[0] eq $ns;
             # update row cache
             $tx->{status} = $ns; $tx->{last_action_id} = undef;
@@ -459,8 +459,8 @@ sub _set_tx_status_before_or_after_actions {
             # reset last_action_id to mark that we are finished
             $dbh->do("UPDATE tx SET last_action_id=NULL ".
                          "WHERE ser_id=?", {}, $tx->{ser_id})
-                or return "db: Can't update last_action_id->NULL: ".
-                    $dbh->errstr;
+                or return [532, "db: Can't update last_action_id->NULL: ".
+                    $dbh->errstr];
         }
 
         if ($os ne $fs) {
@@ -469,13 +469,14 @@ sub _set_tx_status_before_or_after_actions {
             $dbh->do("UPDATE tx SET status='$fs',last_action_id=NULL ".
                          "WHERE ser_id=?",
                      {}, $tx->{ser_id})
-                or return "db: Can't set tx status to $fs: ".$dbh->errstr;
+                or return [532, "db: Can't set tx status to $fs: ".
+                               $dbh->errstr];
             # update row cache
             $tx->{status} = $fs; $tx->{last_action_id} = undef;
         }
     }
 
-    return;
+    [200];
 }
 
 sub _set_tx_status_before_actions {
@@ -488,12 +489,12 @@ sub _set_tx_status_after_actions {
     $self->_set_tx_status_before_or_after_actions('after', @_);
 }
 
-# return actions (arrayref)
+# return enveloped actions (arrayref)
 sub _get_actions_from_db {
     my ($self, $which) = @_;
 
     # for safety, we shouldn't call this function when which='action' anyway
-    return if $which eq 'action';
+    return [200, "OK", []] if $which eq 'action';
 
     my $dbh = $self->{_dbh};
     my $tx  = $self->{_cur_tx};
@@ -507,15 +508,15 @@ sub _get_actions_from_db {
             ($lai ? "AND (id<>$lai AND ".
                  "ctime <= (SELECT ctime FROM $t WHERE id=$lai)) " : "").
                      "ORDER BY ctime, id", {}, $tx->{ser_id});
-    [reverse @$actions];
+    [200, "OK", [reverse @$actions]];
 }
 
-# return undo actions (arrayref), this is currently used for debugging only
+# return enveloped undo actions (arrayref), this is currently used for debugging
 sub _get_undo_actions_from_db {
     my ($self, $which) = @_;
 
     # rollback does not record undo actions in db
-    return if $which eq 'rollback';
+    return [200, "OK", []] if $which eq 'rollback';
 
     my $dbh = $self->{_dbh};
     my $tx  = $self->{_cur_tx};
@@ -527,17 +528,17 @@ sub _get_undo_actions_from_db {
     my $actions = $dbh->selectall_arrayref(
         "SELECT f, NULL, args, id FROM $t WHERE tx_ser_id=? ".
             "ORDER BY ctime, id", {}, $tx->{ser_id});
-    [reverse @$actions];
+    [200, "OK", [reverse @$actions]];
 }
 
 sub _collect_stash {
     my ($self, $res) = @_;
     my $s = $res->[3]{stash};
-    return unless ref($s) eq 'HASH';
+    return [200] unless ref($s) eq 'HASH';
     $self->{_stash}{$_} = $s->{$_} for keys %$s;
+    [200];
 }
 
-# return undef on success, or error message string
 sub _perform_action {
     my ($self, $which, $action, $opts) = @_;
     my $res;
@@ -553,12 +554,12 @@ sub _perform_action {
     my $dd = $action->[5]{deps} // {};
     if ($dd->{tmp_dir}) { # XXX actually need to use dep_satisfy_rel
         $res = $self->get_tmp_dir;
-        return $res->[1] unless $res->[0] == 200;
+        return err(412, "Can't get tmp dir", $res) unless $res->[0] == 200;
         $args{-tmp_dir} = $res->[2];
     }
     if ($dd->{trash_dir}) { # XXX actually need to use dep_satisfy_rel
         $res = $self->get_trash_dir;
-        return $res->[1] unless $res->[0] == 200;
+        return err($res, "Can't get trash dir", $res) unless $res->[0] == 200;
         $args{-trash_dir} = $res->[2];
     }
     $args{-stash} = $self->{_stash};
@@ -569,7 +570,7 @@ sub _perform_action {
     $args{-tx_action_id} = UUID::Random::generate();
     $self->{_res} = $res = $action->[4]->(%args);
     $log->tracef("$lp check_state args: %s, result: %s", \%args, $res);
-    return "$ep: Check state failed: $res->[0] - $res->[1]"
+    return err(532, "$ep: Check state failed", $res)
         unless $res->[0] == 200 || $res->[0] == 304;
     $log->debug($res->[1]) if $res->[0] == 200 && $res->[1];
     my $undo_actions = $res->[3]{undo_actions} // [];
@@ -584,11 +585,11 @@ sub _perform_action {
 
     my $pkg = $action->[0]; $pkg =~ s/::\w+\z//;
     $res = $self->_check_actions($undo_actions, {qualify=>$pkg});
-    return $res if $res;
+    return $res unless $res->[0] == 200;
 
     if ($do_actions) {
         $res = $self->_check_actions($do_actions, {qualify=>$pkg});
-        return $res if $res;
+        return $res unless $res->[0] == 200;
     }
 
     # record action
@@ -598,11 +599,11 @@ sub _perform_action {
         $dbh->do("INSERT INTO $t (tx_ser_id,ctime,f,args) ".
                      "VALUES (?,?,?,?)", {},
                  $tx->{ser_id}, time(), $action->[0], $action->[2])
-            or return "$ep: db: can't insert $t: ".$dbh->errstr;
+            or return [532, "$ep: db: can't insert $t: ".$dbh->errstr];
         my $action_id = $dbh->last_insert_id("","","","");
         $dbh->do("UPDATE tx SET last_action_id=? WHERE ser_id=?", {},
                  $action_id, $tx->{ser_id})
-            or return "$ep: db: can't set last_action_id: ".$dbh->errstr;
+            or return [532, "$ep: db: can't set last_action_id: ".$dbh->errstr];
         $action->[3] = $action_id;
     }
 
@@ -621,15 +622,15 @@ sub _perform_action {
                     "INSERT INTO do_action (tx_ser_id,ctime,f,args) ".
                         "VALUES (?,?,?,?)", {},
                     $tx->{ser_id}, time(), $ua->[0], $ua->[2])
-                    or return "$ep: db: can't insert undo_action: ".
-                        $dbh->errstr;
+                    or return [532, "$ep: db: can't insert undo_action: ".
+                                   $dbh->errstr];
             } else {
                 $dbh->do(
                     "INSERT INTO undo_action(tx_ser_id,action_id,ctime,f,args)".
                         "VALUES (?,?,?,?,?)", {},
                     $tx->{ser_id}, $action->[3], time(), $ua->[0], $ua->[2])
-                    or return "$ep: db: can't insert do_action: ".
-                        $dbh->errstr;
+                    or return [532, "$ep: db: can't insert do_action: ".
+                                   $dbh->errstr];
             }
             $j++;
         }
@@ -646,7 +647,7 @@ sub _perform_action {
         }
 
         $res = $self->_action($do_actions, $opts);
-        return $res if $res;
+        return $res unless $res->[0] == 200;
 
         for ('after_inner_action') {
             last unless $_hooks{$_};
@@ -658,7 +659,7 @@ sub _perform_action {
         $args{-tx_action} = 'fix_state';
         $self->{_res} = $res = $action->[4]->(%args);
         $log->tracef("$lp fix_state args: %s, result: %s", \%args, $res);
-        return "$ep: action failed: $res->[0] - $res->[1]"
+        return [532, "$ep: action failed", $res]
             unless $res->[0] == 200 || $res->[0] == 304;
         $self->_collect_stash($res);
     }
@@ -677,13 +678,11 @@ sub _perform_action {
                  $action->[3], $tx->{ser_id});
     }
 
-    return;
+    [200];
 }
 
 # rollback, undo, redo, action are all action loops. we combine them here into a
 # common routine.
-#
-# return undef on success, or an error string on failure.
 sub _action_loop {
     # $actions is only for which='action'. for rollback/undo/redo, $actions is
     # taken from the database table.
@@ -701,7 +700,7 @@ sub _action_loop {
             ($self->{_action_nest_level} ? "($self->{_action_nest_level})":"").
                 "]";
 
-    return "BUG: 'which' must be rollback/undo/redo/action"
+    return [532, "BUG: 'which' must be rollback/undo/redo/action"]
         unless $which =~ /\A(rollback|undo|redo|action)\z/;
 
     # this prevent endless loop in rollback, since we call functions when doing
@@ -713,7 +712,7 @@ sub _action_loop {
     local $self->{_in_redo} = 1 if $which eq 'redo';
 
     my $tx = $self->{_cur_tx};
-    return "called w/o Rinci transaction, probably a bug" unless $tx;
+    return [532, "called w/o Rinci transaction, probably a bug"] unless $tx;
 
     my $dbh = $self->{_dbh};
     $self->_rollback_dbh;
@@ -726,7 +725,7 @@ sub _action_loop {
     # first we need to set the appropriate transaction status first, to prevent
     # other clients from interfering/racing.
     $res = $self->_set_tx_status_before_actions($which);
-    return $res if $res;
+    return $res unless $res->[0] == 200;
 
     $self->{_stash} = {};
 
@@ -735,13 +734,13 @@ sub _action_loop {
     # are the rollback process itself, in which case we set tx status to X and
     # give up).
     my $eval_res = eval {
-        $actions = $self->_get_actions_from_db($which) unless $actions;
+        $actions = $self->_get_actions_from_db($which)->[2] unless $actions;
         $log->tracef("$lp Actions to perform: %s",
                      [map {[$_->[0], $_->[2] // $_->[1]]} @$actions]);
 
         # check the actions
         $res = $self->_check_actions($actions);
-        return $res if $res;
+        return $res unless $res->[0] == 200;
 
         my $i = 0;
         for my $action (@$actions) {
@@ -749,56 +748,64 @@ sub _action_loop {
             local $lp = "$lp [action #$i/".scalar(@$actions)." ($action->[0])]";
             local $ep = "action #$i/".scalar(@$actions)." ($action->[0])";
             $res = $self->_perform_action($which, $action, $opts);
-            return $res if $res;
+            return $res unless $res->[0] == 200;
         }
 
         $res = $self->_set_tx_status_after_actions($which);
-        return $res if $res;
+        return $res unless $res->[0] == 200;
 
-        return;
+        [200];
     }; # eval
-    my $eval_err = $@ || $eval_res;
-    #$log->tracef("eval_err=%s", $eval_err); #COMMENT
+    my $eval_err = $@;
 
-    if ($eval_err) {
+    if ($eval_err || $eval_res->[0] != 200) {
         if ($which eq 'rollback') {
             # if failed during rolling back, we don't know what else to do. we
             # set Rtx status to X (inconsistent) and ignore it.
             $dbh->do("UPDATE tx SET status='X' WHERE ser_id=?",
                      {}, $tx->{ser_id});
-            return $eval_err;
+            return $eval_err ?
+                err(532, "died during rollback: $eval_err") :
+                    err(532, "error during rollback", $eval_res);
         } elsif (!$opts->{rollback} || ($self->{_action_nest_level}//0) > 1) {
             # do not rollback nested action or if told not to rollback
-            return $eval_err;
+            return $eval_err ?
+                err(532, "died during nested action (no rollback): $eval_err") :
+                err(532, "error during nested action (no rollback)", $eval_res);
         } else {
             my $rbres = $self->_rollback;
-            if ($rbres) {
-                return $eval_err.
-                    " (rollback failed: $rbres)";
+            if ($rbres->[0] != 200) {
+                $rbres->[3]{prev} = $eval_res;
+                return $eval_err ?
+                    err(532, $eval_err." (rollback failed)", $rbres) :
+                    err(532, "$eval_res->[0] - $eval_res->[1] ".
+                            "(rollback failed)", $rbres);
             } else {
-                return $eval_err." (rolled back)"; # txt1a SEE:txt1b
+                return $eval_err ?
+                    err(532, $eval_err." (rolled back)", $eval_res) :
+                    err(532, "$eval_res->[0] - $eval_res->[1] (rolled back)",
+                        $eval_res);
             }
         }
     }
 
     if ($log->is_trace) {
-        my $undo_actions = $self->_get_undo_actions_from_db($which);
+        my $undo_actions = $self->_get_undo_actions_from_db($which)->[2];
         $log->tracef("$lp Recorded undo actions: %s",
                      [map {[$_->[0], $_->[2]]} @$undo_actions])
             if $undo_actions;
     }
 
-    return;
+    [200];
 }
 
-# return undef on success, or an error string on failure
 sub _cleanup {
     my ($self, $which) = @_;
     $log->tracef("$lp Performing cleanup ...");
 
     # there should be only one process running
     my $res = $self->_lock_db(undef);
-    return $res if $res;
+    return $res unless $res->[0] == 200;
 
     my $data_dir = $self->{data_dir};
     my $dbh = $self->{_dbh};
@@ -828,10 +835,9 @@ sub _cleanup {
     $log->tracef("$lp Finished cleanup");
     $self->_unlock_db;
 
-    $res;
+    [200];
 }
 
-# return undef on success, or an error string on failure
 sub _recover {
     my ($self, $which) = @_;
 
@@ -840,7 +846,7 @@ sub _recover {
 
     # there should be only one process running
     my $res = $self->_lock_db(undef);
-    return $res if $res;
+    return $res unless $res->[0] == 200;
 
     my $dbh = $self->{_dbh};
     my $sth;
@@ -852,7 +858,7 @@ sub _recover {
             "OR (status='i' AND last_action_id IS NOT NULL)".
                 "ORDER BY ctime DESC",
     );
-    $sth->execute or return "db: Can't select tx: ".$dbh->errstr;
+    $sth->execute or return [532, "db: Can't select tx: ".$dbh->errstr];
     while (my $row = $sth->fetchrow_hashref) {
         $self->{_cur_tx} = $row;
         $self->_rollback;
@@ -863,7 +869,7 @@ sub _recover {
         "SELECT * FROM tx WHERE status IN ('u') ".
                 "ORDER BY ctime DESC",
     );
-    $sth->execute or return "db: Can't select tx: ".$dbh->errstr;
+    $sth->execute or return [532, "db: Can't select tx: ".$dbh->errstr];
     while (my $row = $sth->fetchrow_hashref) {
         $self->{_cur_tx} = $row;
         $self->_undo;
@@ -874,7 +880,7 @@ sub _recover {
         "SELECT * FROM tx WHERE status IN ('d') ".
                 "ORDER BY ctime ASC",
     );
-    $sth->execute or return "db: Can't select tx: ".$dbh->errstr;
+    $sth->execute or return [532, "db: Can't select tx: ".$dbh->errstr];
     while (my $row = $sth->fetchrow_hashref) {
         $self->{_cur_tx} = $row;
         $self->_redo;
@@ -883,11 +889,10 @@ sub _recover {
   EXIT_RECOVERY:
     $self->_unlock_db;
     $log->tracef("$lp Finished recovery");
-    return;
+    [200];
 }
 
-# return enveloped result
-sub _resp_tx_status {
+sub _resp_incorrect_tx_status {
     my ($self, $r) = @_;
 
     state $statuses = {
@@ -937,13 +942,13 @@ sub _resp_tx_status {
 sub _wrap {
     my ($self, %wargs) = @_;
     my $margs = $wargs{args}
-        or return [500, "BUG: args not passed to _wrap()"];
+        or return [532, "BUG: args not passed to _wrap()"];
     my @caller = caller(1);
 
     my $res;
 
     $res = $self->_lock_db("shared");
-    return [532, "Can't acquire lock: $res"] if $res;
+    return [532, "Can't acquire lock: $res"] unless $res->[0] == 200;
 
     $self->{_now} = time();
 
@@ -961,7 +966,8 @@ sub _wrap {
 
     if ($wargs{cleanup}) {
         $res = $self->_cleanup;
-        return [532, "Can't succesfully cleanup: $res"] if $res;
+        return err(532, "Can't succesfully cleanup", $res)
+            unless $res->[0] == 200;
     }
 
     # we need to begin sqltx here so that client's actions like rollback() and
@@ -975,10 +981,8 @@ sub _wrap {
 
     if ($wargs{hook_check_args}) {
         $res = $wargs{hook_check_args}->(%$margs);
-        if ($res) {
-            $self->_rollback;
-            return $res;
-        }
+        do { $self->_rollback; return err(532, "hook_check_args failed", $res) }
+            unless $res->[0] == 200;
     }
 
     if ($wargs{tx_status}) {
@@ -995,7 +999,7 @@ sub _wrap {
         }
         unless ($ok) {
             $self->_rollback_dbh;
-            return $self->_resp_tx_status($cur_tx);
+            return $self->_resp_incorrect_tx_status($cur_tx);
         }
     }
 
@@ -1009,14 +1013,15 @@ sub _wrap {
         }
     }
 
-    $self->_commit_dbh or return [532, "db: Can't commit: ".$dbh->errstr];
+    my $res2 = $self->_commit_dbh;
+    return $res2 unless $res2->[0] == 200;
 
     if ($wargs{hook_after_commit}) {
-        my $res2 = $wargs{hook_after_tx}->(%$margs);
-        return $res2 if $res2;
+        $res2 = $wargs{hook_after_tx}->(%$margs);
+        return err(532, "hook_after_tx failed", $res2) unless $res2->[0] == 200;
     }
 
-    return $res;
+    $res;
 }
 
 # all methods that don't work inside a transaction have some common code, e.g.
@@ -1032,14 +1037,14 @@ sub _wrap {
 sub _wrap2 {
     my ($self, %wargs) = @_;
     my $margs = $wargs{args}
-        or return [500, "BUG: args not passed to _wrap()"];
+        or return [532, "BUG: args not passed to _wrap()"];
     my @caller = caller(1);
 
     my $res;
 
     if ($wargs{lock_db}) {
         $res = $self->_lock_db("shared");
-        return [532, "Can't acquire lock: $res"] if $res;
+        return err(532, "Can't acquire lock", $res) unless $res->[0] == 200;
     }
 
     $res = $wargs{code}->(%$margs);
@@ -1075,12 +1080,11 @@ sub begin {
             $self->{_cur_tx} = $dbh->selectrow_hashref(
                 "SELECT * FROM tx WHERE str_id=?", {}, $args{tx_id})
                 or return [532, "db: Can't select tx: ".$dbh->errstr];
-            [200, "OK"];
+            [200];
         },
     );
 }
 
-# return undef on success, or error message string
 sub _action {
     my ($self, $actions, $opts) = @_;
     $self->_action_loop('action', $actions, $opts);
@@ -1107,24 +1111,26 @@ sub action {
         code => sub {
             my $cur_tx = $self->{_cur_tx};
             if ($cur_tx->{status} ne 'i' && !$self->{_in_rollback}) {
-                return $self->_resp_tx_status($cur_tx);
+                return $self->_resp_incorrect_tx_status($cur_tx);
             }
 
             delete $self->{_res};
             my $res = $self->_action($actions, {confirm=>$args{confirm}});
-            if ($res) {
+            if ($res->[0] != 200 && $res->[0] != 304) {
                 if ($self->{_res} && $self->{_res}[0] !~ /200|304/) {
                     return [$self->{_res}[0],
                             $self->{_res}[1],
                             undef,
-                            {tx_result=>$res}];
+                            {tx_result=>$res, prev=>$res}];
                 } else {
-                    return [532, $res];
+                    return err(532, {prev=>$res});
                 }
             } else {
-                return [$self->{_res}[0], $self->{_res}[1],
+                return [$self->{_res}[0],
+                        $self->{_res}[1],
                         $self->{_stash}{result},
-                        $self->{_stash}{result_meta}];
+                        { %{ $self->{_stash}{result_meta} // {} },
+                          %{ $res->[3] // {}} }];
             }
         },
     );
@@ -1140,7 +1146,7 @@ sub commit {
             my $tx  = $self->{_cur_tx};
             if ($tx->{status} eq 'a') {
                 my $res = $self->_rollback;
-                return [532, "Can't roll back: $res"] if $res;
+                return $res unless $res->[0] == 200;
                 return [200, "Rolled back"];
             }
             $dbh->do(
@@ -1149,46 +1155,43 @@ sub commit {
                      {}, "C", $self->{_now}, $tx->{ser_id})
                 or return [532, "db: Can't update tx status to committed: ".
                                $dbh->errstr];
-            [200, "OK"];
+            [200];
         },
     );
 }
 
-# return undef on success, or error message string
 sub _rollback {
     my ($self) = @_;
     my $dbh = $self->{_dbh};
     my $tx  = $self->{_cur_tx};
 
     my $res = $self->_action_loop('rollback');
-    return $res if $res;
+    return $res unless $res->[0] == 200;
     $dbh->do("DELETE FROM do_action   WHERE tx_ser_id=?", {}, $tx->{ser_id});
     $dbh->do("DELETE FROM undo_action WHERE tx_ser_id=?", {}, $tx->{ser_id});
-    return;
+    [200];
 }
 
-# return undef on success, or error message string
 sub _undo {
     my ($self, $opts) = @_;
     my $dbh = $self->{_dbh};
     my $tx  = $self->{_cur_tx};
 
     my $res = $self->_action_loop('undo', undef, $opts);
-    return $res if $res;
+    return $res unless $res->[0] == 200;
     $dbh->do("DELETE FROM undo_action WHERE tx_ser_id=?", {}, $tx->{ser_id});
-    return;
+    [200];
 }
 
-# return undef on success, or error message string
 sub _redo {
     my ($self, $opts) = @_;
     my $dbh = $self->{_dbh};
     my $tx  = $self->{_cur_tx};
 
     my $res = $self->_action_loop('redo', undef, $opts);
-    return $res if $res;
+    return $res unless $res->[0] == 200;
     $dbh->do("DELETE FROM do_action WHERE tx_ser_id=?", {}, $tx->{ser_id});
-    return;
+    [200];
 }
 
 sub rollback {
@@ -1198,8 +1201,7 @@ sub rollback {
         tx_status => ["i", "a"],
         rollback => 0, # _action_loop already does rollback
         code => sub {
-            my $res = $self->_rollback;
-            $res ? [532, $res] : [200, "OK"];
+            $self->_rollback;
         },
     );
 }
@@ -1275,17 +1277,17 @@ sub undo {
         code => sub {
             delete $self->{_res};
             my $res = $self->_undo({confirm=>$args{confirm}});
-            if ($res) {
+            if ($res->[0] != 200 && $res->[0] != 304) {
                 if ($self->{_res} && $self->{_res}[0] !~ /200|304/) {
                     return [$self->{_res}[0],
                             $self->{_res}[1],
                             undef,
-                            {tx_result=>$res}];
+                            {tx_result=>$res, prev=>$res}];
                 } else {
-                    return [532, $res];
+                    return err(532, {prev=>$res});
                 }
             } else {
-                return [200, "OK"];
+                return [200];
             }
         },
     );
@@ -1311,23 +1313,22 @@ sub redo {
         code => sub {
             delete $self->{_res};
             my $res = $self->_redo({confirm=>$args{confirm}});
-            if ($res) {
+            if ($res->[0] != 200 && $res->[0] != 304) {
                 if ($self->{_res} && $self->{_res}[0] !~ /200|304/) {
                     return [$self->{_res}[0],
                             $self->{_res}[1],
                             undef,
-                            {tx_result=>$res}];
+                            {tx_result=>$res, prev=>$res}];
                 } else {
-                    return [532, $res];
+                    return err(532, {prev=>$res});
                 }
             } else {
-                return [200, "OK"];
+                return [200];
             }
         },
     );
 }
 
-# return enveloped result
 sub _discard {
     my ($self, $which, %args) = @_;
     my $wmeth = $which eq 'one' ? '_wrap' : '_wrap2';
@@ -1362,7 +1363,7 @@ sub _discard {
                 $dbh->do("DELETE FROM do_action WHERE tx_ser_id IN ($txs)");
                 $log->infof("$lp discard tx: %s", \@txs);
             }
-            [200, "OK"];
+            [200];
         },
     );
 }
@@ -1380,7 +1381,7 @@ sub discard_all {
 1;
 # ABSTRACT: A Rinci transaction manager
 
-=for Pod::Coverage ^(call)$
+=for Pod::Coverage ^(call|get_func_and_meta)$
 
 =head1 SYNOPSIS
 
