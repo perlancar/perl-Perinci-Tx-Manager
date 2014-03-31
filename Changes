@@ -1,5 +1,14 @@
 Revision history for Perinci-Tx-Manager
 
+0.47     2014-03-31 (SHARYANTO)
+
+         [INTERNAL]
+
+         - Change all methods (including internal ones) to return enveloped
+           result, so we can better return previous errors, for
+           tracing/debugging.
+
+
 0.46     2014-03-30 (SHARYANTO)
 
          - No functional changes.
