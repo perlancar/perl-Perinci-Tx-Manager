@@ -1,5 +1,12 @@
 Revision history for Perinci-Tx-Manager
 
+0.48     2014-05-01 (SHARYANTO)
+
+         - No functional changes.
+
+         - Bump prereq version to avoid fail reports [CT].
+
+
 0.47     2014-03-31 (SHARYANTO)
 
          [INTERNAL]
