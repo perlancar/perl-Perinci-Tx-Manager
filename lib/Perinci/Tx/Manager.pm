@@ -12,7 +12,7 @@ use JSON;
 use Log::Any '$log';
 use Perinci::Sub::Util qw(err);
 use Scalar::Util qw(blessed);
-use SHARYANTO::Package::Util qw(package_exists);
+use Package::MoreUtil qw(package_exists);
 use Time::HiRes qw(time);
 use UUID::Random;
 
