@@ -1,5 +1,13 @@
 Revision history for Perinci-Tx-Manager
 
+0.50    2014-12-05 (PERLANCAR)
+
+	- No functional changes.
+
+	- Use the new renamed module SHARYANTO::Package::Util ->
+	  Package::MoreUtil.
+
+
 0.49     2014-05-01 (SHARYANTO)
 
          - [Bugfix] Make sure subtest has at least one test (previously
