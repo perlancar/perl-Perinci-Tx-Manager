@@ -1,5 +1,12 @@
 Revision history for Perinci-Tx-Manager
 
+0.51    2015-08-18 (PERLANCAR)
+
+	- No functional changes.
+
+	- Switch from Log::Any to Log::Any::IfLOG.
+
+
 0.50    2014-12-05 (PERLANCAR)
 
 	- No functional changes.
