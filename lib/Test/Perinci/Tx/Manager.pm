@@ -1,9 +1,12 @@
 package Test::Perinci::Tx::Manager;
 
+# DATE
+# VERSION
+
 use 5.010;
 use strict;
 use warnings;
-use Log::Any '$log';
+use Log::Any::IfLOG '$log';
 
 use File::Remove qw(remove);
 use Perinci::Access::Schemeless;
@@ -11,8 +14,6 @@ use Perinci::Tx::Manager;
 use Scalar::Util qw(blessed);
 use Test::More 0.98;
 use UUID::Random;
-
-# VERSION
 
 require Exporter;
 our @ISA = qw(Exporter);

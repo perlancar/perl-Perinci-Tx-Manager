@@ -1,15 +1,18 @@
 package Perinci::Tx::Manager;
 
+# DATE
+# VERSION
+
 use 5.010001;
 use strict;
 use warnings;
 use experimental 'smartmatch';
+use Log::Any::IfLOG '$log';
 
 use DBI;
 use File::Flock;
 use File::Remove qw(remove);
 use JSON;
-use Log::Any '$log';
 use Perinci::Sub::Util qw(err);
 use Scalar::Util qw(blessed);
 use Package::MoreUtil qw(package_exists);
@@ -40,8 +43,6 @@ sub action_get_code_and_meta {
 }
 
 package Perinci::Tx::Manager;
-
-# VERSION
 
 my $proto_v = 2;
 
