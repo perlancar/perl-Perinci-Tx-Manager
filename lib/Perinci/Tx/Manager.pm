@@ -21,7 +21,8 @@ use UUID::Random;
 
 # patch, add special action to just retrieve code and meta
 require Perinci::Access::Schemeless;
-package Perinci::Access::Schemeless;
+package
+    Perinci::Access::Schemeless;
 
 sub actionmeta_get_code_and_meta { +{
     applies_to => ['function'],
