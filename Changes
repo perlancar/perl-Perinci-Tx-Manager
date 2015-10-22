@@ -1,5 +1,12 @@
 Revision history for Perinci-Tx-Manager
 
+0.54    2015-10-22 (PERLANCAR)
+
+        - No functional changes.
+
+        - Replace File::Flock with the more lightweight File::Flock::Retry.
+
+
 0.53    2015-09-04 (PERLANCAR)
 
 	- No functional changes.
