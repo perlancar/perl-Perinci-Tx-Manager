@@ -10,7 +10,7 @@ use experimental 'smartmatch';
 use Log::Any::IfLOG '$log';
 
 use DBI;
-use File::Flock;
+use File::Flock::Retry;
 use File::Remove qw(remove);
 use JSON;
 use Perinci::Sub::Util qw(err);
@@ -100,26 +100,22 @@ sub new {
 sub _lock_db {
     my ($self, $shared) = @_;
 
-    my $locked;
-    my $secs = 0;
-    for (1..5) {
-        # we don't lock the db file itself because on some OS's like OpenBSD,
-        # this results in 'DB is locked' SQLite error.
-        $locked = lock("$self->{_db_file}.lck", $shared, "nonblocking");
-        last if $locked;
-        sleep    $_;
-        $secs += $_;
-    }
+    eval {
+        unless ($self->{_lock}) {
+            $self->{_lock} = File::Flock::Retry->lock(
+                "$self->{_db_file}.lck", {retries=>5, shared=>1});
+        }
+    };
     return [532, "Tx database is still locked by other process ".
-                "(probably recovery) after $secs seconds, giving up"]
-        unless $locked;
+                "(probably recovery) after 5 seconds, giving up: $@"]
+        if $@;
     [200];
 }
 
 sub _unlock_db {
     my ($self) = @_;
 
-    unlock("$self->{_db_file}.lck");
+    undef $self->{_lock};
     [200];
 }
 
