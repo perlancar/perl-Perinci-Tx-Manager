@@ -1,5 +1,12 @@
 Revision history for Perinci-Tx-Manager
 
+0.55    2016-03-16 (PERLANCAR)
+
+	- No functional changes.
+
+	- Replace JSON with JSON::MaybeXS.
+
+
 0.54    2015-10-22 (PERLANCAR)
 
         - No functional changes.
