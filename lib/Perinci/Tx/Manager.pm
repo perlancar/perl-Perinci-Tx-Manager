@@ -12,7 +12,7 @@ use Log::Any::IfLOG '$log';
 use DBI;
 use File::Flock::Retry;
 use File::Remove qw(remove);
-use JSON;
+use JSON::MaybeXS;
 use Perinci::Sub::Util qw(err);
 use Scalar::Util qw(blessed);
 use Package::MoreUtil qw(package_exists);
@@ -50,7 +50,7 @@ my $proto_v = 2;
 our $ep = ""; # error prefix
 our $lp = "[tm]"; # log prefix
 
-my $json = JSON->new->allow_nonref;
+my $json = JSON::MaybeXS->new->allow_nonref;
 
 # this is used for testing purposes only (e.g. to simulate crash)
 our %_hooks;
