@@ -1,5 +1,12 @@
 Revision history for Perinci-Tx-Manager
 
+0.56    2016-06-10 (PERLANCAR)
+
+	- No functional changes.
+
+	- [dist] Bump prereq version Perinci::Access::Schemeless -> 0.87.
+
+
 0.55    2016-03-16 (PERLANCAR)
 
 	- No functional changes.
