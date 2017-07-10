@@ -6,7 +6,7 @@ package Test::Perinci::Tx::Manager;
 use 5.010;
 use strict;
 use warnings;
-use Log::Any::IfLOG '$log';
+use Log::ger;
 
 use File::Remove qw(remove);
 use Perinci::Access::Schemeless;
@@ -160,7 +160,7 @@ sub test_tx_action {
                         return if $args{which} eq 'rollback';
                         $ja++ if $args{which} eq 'action';
                         if ($ja == $i && $nl == ($has_do_actions ? 2:1)) {
-                            for ("CRASH DURING ACTION") {$log->trace($_);die $_}
+                            for ("CRASH DURING ACTION") {log_trace($_);die $_}
                        }
                     };
                     eval {
@@ -205,12 +205,12 @@ sub test_tx_action {
                             # we need to trigger the rollback first, after last
                             # action
                             return unless ++$ja >= $num_actions;
-                            for ("CRASH DURING ACTION") {$log->trace($_);die $_}
+                            for ("CRASH DURING ACTION") {log_trace($_);die $_}
                         }
                         $jrb++ if $args{which} eq 'rollback';
                         if ($jrb == $i) {
                             for("CRASH DURING ROLLBACK"){
-                                $crashed++; $log->trace($_); die $_;
+                                $crashed++; log_trace($_); die $_;
                             }
                         }
                     };
@@ -292,7 +292,7 @@ sub test_tx_action {
                         return unless $args{which} eq 'undo';
                         if (++$ju == $i) {
                             for ("CRASH DURING UNDO ACTION") {
-                                $log->trace($_);die $_;
+                                log_trace($_);die $_;
                             }
                         }
                     };
@@ -346,13 +346,13 @@ sub test_tx_action {
                             # first we trigger a rollback at the last step
                             if (++$ju == $num_undo_actions) {
                                 for ("CRASH DURING UNDO ACTION") {
-                                    $log->trace($_);die $_;
+                                    log_trace($_);die $_;
                                 }
                             }
                         } elsif ($args{which} eq 'rollback') {
                             if (++$jrb == $i) {
                                 for ("CRASH DURING ROLLBACK") {
-                                    $crashed++; $log->trace($_);die $_;
+                                    $crashed++; log_trace($_);die $_;
                                 }
                             }
                         }
@@ -410,7 +410,7 @@ sub test_tx_action {
                         return unless $args{which} eq 'redo';
                         if (++$jrd == $i) {
                             for ("CRASH DURING REDO ACTION") {
-                                $crashed++; $log->trace($_); die $_;
+                                $crashed++; log_trace($_); die $_;
                             }
                         }
                     };
@@ -466,13 +466,13 @@ sub test_tx_action {
                             # first we trigger a rollback at the last step
                             if (++$jrd == $num_actions) {
                                 for ("CRASH DURING REDO ACTION") {
-                                    $log->trace($_);die $_;
+                                    log_trace($_);die $_;
                                 }
                             }
                         } elsif ($args{which} eq 'rollback') {
                             if (++$jrb == $i) {
                                 for ("CRASH DURING ROLLBACK") {
-                                    $crashed++; $log->trace($_); die $_;
+                                    $crashed++; log_trace($_); die $_;
                                 }
                             }
                         }
