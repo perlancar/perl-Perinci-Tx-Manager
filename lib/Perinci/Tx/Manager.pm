@@ -1389,9 +1389,9 @@ sub discard_all {
 =head1 DESCRIPTION
 
 This class implements transaction and undo manager (TM), as specified by
-L<Rinci::function::Transaction> and L<Riap::Transaction>. It is meant to be
-instantiated by L<Perinci::Access::Schemeless>, but will also be passed to
-transactional functions to save undo/redo data.
+L<Rinci::Transaction> and L<Riap::Transaction>. It is meant to be instantiated
+by L<Perinci::Access::Schemeless>, but will also be passed to transactional
+functions to save undo/redo data.
 
 It uses SQLite database to store transaction list and undo/redo data as well as
 transaction data directory to provide trash_dir/tmp_dir for functions that
