@@ -6,7 +6,6 @@ package Perinci::Tx::Manager;
 use 5.010001;
 use strict;
 use warnings;
-use experimental 'smartmatch';
 use Log::ger;
 
 use DBI;
@@ -817,7 +816,7 @@ sub _cleanup {
         my @tx_ids = map {$_->[0]}
             @{ $dbh->selectall_arrayref("SELECT ser_id FROM tx") // []};
         for my $tx_id (@dirs) {
-            next if $tx_id ~~ @tx_ids;
+            next if grep { $tx_id eq $_ } @tx_ids;
             log_trace("Deleting %s ...", "$dir/$tx_id");
             remove "$dir/$tx_id";
         }
@@ -988,13 +987,7 @@ sub _wrap {
             $self->_rollback_dbh;
             return [484, "No such transaction"];
         }
-        my $ok;
-        # 'str' ~~ $aryref doesn't seem to work?
-        if (ref($wargs{tx_status}) eq 'ARRAY') {
-            $ok = $cur_tx->{status} ~~ @{$wargs{tx_status}};
-        } else {
-            $ok = $cur_tx->{status} ~~ $wargs{tx_status};
-        }
+        my $ok = grep { $cur_tx->{status} eq $_ } @{$wargs{tx_status}};
         unless ($ok) {
             $self->_rollback_dbh;
             return $self->_resp_incorrect_tx_status($cur_tx);
